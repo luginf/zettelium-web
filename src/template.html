@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zettelium</title>
+<style>
+{{STYLE}}
+</style>
+</head>
+<body>
+
+<!-- Repository list screen -->
+<div id="repo-screen">
+  <div id="repo-header">
+    <span id="repo-title">Zettelium</span>
+    <button id="repo-settings-btn" title="Réglages">⚙</button>
+    <button id="repo-add-btn" title="Ajouter un dépôt (dossier)">+ Dépôt</button>
+  </div>
+  <p id="repo-empty-hint" class="hint" hidden>
+    Aucun dépôt enregistré. Un dossier est un dossier réel sur votre disque —
+    cliquez sur « + Dépôt » pour en choisir un.
+  </p>
+  <div id="repo-list"></div>
+  <p class="hint" id="repo-support-hint"></p>
+</div>
+
+<!-- Global settings screen -->
+<div id="settings-screen" hidden>
+  <div id="settings-header">
+    <button id="settings-back-btn" title="Retour">←</button>
+    <span>Réglages</span>
+  </div>
+  <div id="settings-body">
+    <p class="settings-section-title">Thème</p>
+    <label class="settings-row"><span>Palette de couleurs</span>
+      <select id="settings-scheme"></select>
+    </label>
+    <div id="settings-scheme-preview">
+      <div class="scheme-preview-row">
+        <span class="hint">Sombre</span>
+        <span id="settings-scheme-preview-dark" class="scheme-preview-swatches"></span>
+      </div>
+      <div class="scheme-preview-row">
+        <span class="hint">Clair</span>
+        <span id="settings-scheme-preview-light" class="scheme-preview-swatches"></span>
+      </div>
+    </div>
+    <button id="settings-edit-theme-btn" class="settings-full-width-btn">Modifier les couleurs</button>
+    <label class="settings-row"><input type="checkbox" id="settings-dark-mode"> <span>Mode sombre</span></label>
+
+    <p class="settings-section-title">Fichiers</p>
+    <label class="settings-row"><span>Extensions reconnues</span>
+      <input type="text" id="settings-extensions-input" autocomplete="off">
+    </label>
+    <label class="settings-row"><input type="checkbox" id="settings-extensions-all"> <span>Tous les fichiers (ignorer le filtre)</span></label>
+
+    <p class="settings-section-title">Zettelkasten</p>
+    <label class="settings-row"><span>Motif de détection d'ID (regex)</span>
+      <input type="text" id="settings-id-pattern" autocomplete="off">
+    </label>
+    <label class="settings-row"><span>Format de génération d'ID</span>
+      <input type="text" id="settings-id-format" autocomplete="off">
+    </label>
+    <p id="settings-id-preview" class="hint"></p>
+  </div>
+</div>
+
+<!-- Theme list screen -->
+<div id="theme-list-screen" hidden>
+  <div id="theme-list-header">
+    <button id="theme-list-back-btn" title="Retour">←</button>
+    <span>Thèmes</span>
+    <button id="theme-list-new-btn" title="Nouveau thème">+</button>
+  </div>
+  <div id="theme-list"></div>
+</div>
+
+<!-- Theme editor screen -->
+<div id="theme-editor-screen" hidden>
+  <div id="theme-editor-header">
+    <button id="theme-editor-back-btn" title="Annuler">←</button>
+    <span id="theme-editor-title"></span>
+  </div>
+  <div id="theme-editor-body">
+    <label class="settings-row"><span>Nom</span>
+      <input type="text" id="theme-editor-name" autocomplete="off">
+    </label>
+    <div id="theme-tabs">
+      <button id="theme-tab-dark" class="active">Sombre</button>
+      <button id="theme-tab-light">Clair</button>
+    </div>
+    <div id="theme-editor-colors"></div>
+  </div>
+  <div class="dlg-btn-row">
+    <button id="theme-editor-cancel">Annuler</button>
+    <button id="theme-editor-save">💾 Enregistrer</button>
+  </div>
+</div>
+
+<!-- Duplicate theme (name prompt) -->
+<dialog id="theme-dup-dlg">
+  <div id="theme-dup-header">
+    <span>Dupliquer le thème</span>
+  </div>
+  <div id="theme-dup-body">
+    <input type="text" id="theme-dup-name" autocomplete="off">
+    <p id="theme-dup-error" class="hint"></p>
+  </div>
+  <div class="dlg-btn-row">
+    <button id="theme-dup-cancel">Annuler</button>
+    <button id="theme-dup-create">Créer</button>
+  </div>
+</dialog>
+
+<!-- File browser screen (active repository) -->
+<div id="browser-screen" hidden>
+  <div id="browser-header">
+    <button id="browser-back-btn" title="Dossier parent (ou retour aux dépôts à la racine)">←</button>
+    <span id="browser-title"></span>
+    <button id="browser-options-btn" title="Options du dépôt">⋮</button>
+    <button id="browser-repair-btn" title="Réparer les liens Zettelkasten de ce dépôt">🔗</button>
+    <button id="browser-refresh-btn" title="Rafraîchir la liste">⟳</button>
+    <button id="browser-settings-btn" title="Réglages">⚙</button>
+  </div>
+  <div id="browser-search-bar">
+    <div id="browser-search-mode">
+      <button data-mode="name" class="active">Nom</button>
+      <button data-mode="content">Contenu</button>
+      <button data-mode="tag">#Tag</button>
+    </div>
+    <input type="text" id="browser-search-input" placeholder="Rechercher…" autocomplete="off">
+    <button id="browser-sort-btn" title="Trier par nom">🔤</button>
+  </div>
+  <p id="browser-empty-hint" class="hint" hidden>
+    Aucun fichier reconnu comme note dans ce dépôt.
+  </p>
+  <div id="browser-list"></div>
+</div>
+
+<!-- Repository options -->
+<dialog id="repo-options-dlg">
+  <div id="repo-options-header">
+    <span>Options du dépôt</span>
+    <button id="repo-options-close" title="Fermer">✕</button>
+  </div>
+  <div id="repo-options-body">
+    <label class="settings-row"><input type="checkbox" id="repo-options-include-extension"> <span>Inclure l'extension dans les liens [[…]]</span></label>
+  </div>
+</dialog>
+
+<!-- Editor screen -->
+<div id="editor-screen" hidden>
+  <div id="ed-header">
+    <button id="editor-back-btn" title="Fermer (retour au dépôt)">✕</button>
+    <span id="editor-title"></span>
+    <div id="ed-actions">
+      <button id="editor-toc-btn" title="Table des matières">📑</button>
+      <button id="editor-backlinks-btn" title="Notes qui font un lien vers celle-ci">
+        <span id="editor-backlinks-badge" class="editor-badge" hidden></span>⛓</button>
+      <button id="editor-preview-btn" title="Aperçu">👁</button>
+      <button id="editor-save-btn" title="Enregistrer (Ctrl+S)" disabled>💾</button>
+      <div id="editor-menu-wrap">
+        <button id="editor-menu-btn" title="Plus d'actions">⋮</button>
+        <div id="editor-menu" hidden>
+          <button id="editor-menu-insert-id">🔢 Insérer un ID Zettelkasten</button>
+          <button id="editor-menu-insert-link">🔗 Insérer un lien</button>
+          <button id="editor-menu-rename">✏️ Renommer</button>
+          <button id="editor-menu-backup-create">🕘 Créer une sauvegarde</button>
+          <button id="editor-menu-backup-restore">♻️ Restaurer une sauvegarde</button>
+          <button id="editor-menu-settings">⚙ Réglages</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="ed-body">
+    <div id="ed-wrap">
+      <pre id="ed-highlight" aria-hidden="true"></pre>
+      <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    </div>
+    <div id="ed-preview" hidden></div>
+  </div>
+</div>
+
+<!-- Save-before-closing confirmation (Yes = save & close, No = discard & close, Cancel = stay) -->
+<dialog id="close-confirm-dlg">
+  <p id="close-confirm-msg"></p>
+  <div class="dlg-btn-row">
+    <button id="close-confirm-yes">Enregistrer et fermer</button>
+    <button id="close-confirm-no">Fermer sans enregistrer</button>
+    <button id="close-confirm-cancel">Annuler</button>
+  </div>
+</dialog>
+
+<!-- Insert-link picker (filterable) -->
+<dialog id="zklink-picker-dlg">
+  <div id="zklink-picker-header">
+    <span>Insérer un lien</span>
+    <button id="zklink-picker-close" title="Fermer">✕</button>
+  </div>
+  <input type="text" id="zklink-filter" placeholder="Filtrer par nom, titre ou ID…" autocomplete="off">
+  <p id="zklink-empty-hint" class="hint" hidden>Aucune note avec un ID Zettelkasten ne correspond.</p>
+  <div id="zklink-list"></div>
+</dialog>
+
+<!-- Backlinks panel -->
+<dialog id="backlinks-dlg">
+  <div id="backlinks-header">
+    <span>Notes qui font un lien vers celle-ci</span>
+    <button id="backlinks-close" title="Fermer">✕</button>
+  </div>
+  <p id="backlinks-empty-hint" class="hint" hidden>Aucune note ne référence celle-ci pour l'instant.</p>
+  <div id="backlinks-list"></div>
+</dialog>
+
+<!-- Table of contents -->
+<dialog id="toc-dlg">
+  <div id="toc-header">
+    <span>Table des matières</span>
+    <button id="toc-close" title="Fermer">✕</button>
+  </div>
+  <p id="toc-empty-hint" class="hint" hidden>Aucun titre détecté dans cette note.</p>
+  <div id="toc-list"></div>
+</dialog>
+
+<!-- Rename note -->
+<dialog id="rename-note-dlg">
+  <div id="rename-note-header">
+    <span>Renommer</span>
+  </div>
+  <div id="rename-note-body">
+    <input type="text" id="rename-note-input" autocomplete="off">
+  </div>
+  <div class="dlg-btn-row">
+    <button id="rename-note-cancel">Annuler</button>
+    <button id="rename-note-confirm">💾 Renommer</button>
+  </div>
+</dialog>
+
+<!-- Restore backup -->
+<dialog id="backup-restore-dlg">
+  <div id="backup-restore-header">
+    <span>Restaurer une sauvegarde</span>
+    <button id="backup-restore-close" title="Fermer">✕</button>
+  </div>
+  <p id="backup-restore-empty-hint" class="hint" hidden>Aucune sauvegarde pour cette note.</p>
+  <div id="backup-restore-list"></div>
+</dialog>
+
+<script>
+{{SCRIPT}}
+</script>
+</body>
+</html>

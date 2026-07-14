@@ -1,0 +1,4023 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zettelium</title>
+<style>
+/* CSS custom properties — set by JS via applyTheme() (app.js), same variable
+   names as writhdeck-web so a future schemes.js-driven theme picker (phase 6)
+   plugs in without renaming anything here. */
+:root {
+  --bg:      #1a1a1a;
+  --fg:      #e8e8e8;
+  --bg-bar:  #2a2a2a;
+  --fg-bar:  #aaaaaa;
+  --bg-sel:  #3a5a8a;
+  --heading: #c8a060;
+  --comment: #606060;
+  --markup:  #6aa9d4;
+  --bg2:     #1a1a1a;
+
+  --font-family: system-ui, sans-serif;
+  --font-size:   15px;
+
+  /* Editor-specific (monospace, independent of the chrome font above) */
+  --ed-font-family: monospace;
+  --ed-font-size:   16px;
+  --ed-line-spacing: 1.5;
+  --ed-margin-x: 40px;
+  --ed-margin-y: 24px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  /* The page itself must never scroll — every screen is its own fixed
+     100vh flex column with an explicit scrollable region inside (the
+     textarea, a list, a dialog...). Without this, once an inner scrollable
+     region (e.g. #ed-input) hits its own scroll limit, the scroll gesture
+     chains up to the document itself, which silently pushes the "fixed"
+     header out of view even though it's flex-shrink:0 in its own
+     container — reported symptom: the editor's top bar scrolls away past
+     the bottom of a note and you have to scroll back up to see it again. */
+  overflow: hidden;
+  background: var(--bg2);
+  color: var(--fg);
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+}
+
+.hint { color: var(--fg-bar); font-size: 0.85em; padding: 8px 12px; }
+
+button {
+  cursor: pointer;
+  background: var(--bg-bar);
+  color: var(--fg-bar);
+  border: 1px solid transparent;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 0.9em;
+}
+button:hover { border-color: var(--fg-bar); }
+button:disabled { opacity: 0.4; cursor: default; }
+button:disabled:hover { border-color: transparent; }
+
+input[type="text"], select {
+  background: var(--bg-bar);
+  color: var(--fg);
+  border: 1px solid var(--fg-bar);
+  font: inherit;
+  padding: 3px 6px;
+}
+
+/* ─── Repository screen ───────────────────────────────────────────────── */
+#repo-screen, #browser-screen, #settings-screen, #theme-list-screen, #theme-editor-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+#repo-screen[hidden], #browser-screen[hidden], #settings-screen[hidden],
+#theme-list-screen[hidden], #theme-editor-screen[hidden] { display: none; }
+
+#repo-header, #browser-header, #settings-header, #theme-list-header, #theme-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#repo-title, #browser-title {
+  font-size: 1.15em;
+  font-weight: bold;
+  color: var(--fg);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#repo-list, #browser-list {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0;
+}
+
+.repo-item, .file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-left: 4px solid transparent;
+}
+.repo-item:hover, .file-item:hover { background: var(--bg-bar); }
+
+.repo-item-name, .file-item-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-item-meta {
+  font-size: 0.75em;
+  color: var(--fg-bar);
+  white-space: nowrap;
+}
+.folder-item { color: var(--heading); font-weight: 500; }
+.repo-item-reauth {
+  color: var(--heading);
+  border-color: var(--heading);
+}
+.repo-item-actions { display: flex; gap: 2px; }
+.repo-item-actions button { padding: 1px 7px; }
+
+/* ─── Browser search bar (always visible, phase 4 — replaces the old
+   extensions bar, which moved to the global Settings screen below) ─────── */
+#browser-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-bar);
+  border-top: 1px solid var(--bg2);
+  flex-wrap: wrap;
+}
+#browser-search-mode { display: flex; gap: 2px; }
+#browser-search-mode button.active { color: var(--fg); border-color: var(--heading); }
+#browser-search-input { flex: 1; min-width: 120px; }
+
+/* ─── Settings screen ──────────────────────────────────────────────────── */
+#settings-body { padding: 4px 12px 16px; overflow-y: auto; overscroll-behavior: contain; }
+.settings-section-title {
+  margin-top: 16px;
+  font-size: 0.8em;
+  color: var(--fg-bar);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.settings-section-title:first-child { margin-top: 8px; }
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bg-bar);
+}
+.settings-row input[type="text"], .settings-row select { flex: 1; max-width: 260px; }
+
+.settings-full-width-btn { display: block; width: 100%; margin: 6px 0 10px; text-align: center; }
+
+#settings-scheme-preview { padding: 4px 0; }
+.scheme-preview-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.scheme-preview-swatches { display: flex; gap: 3px; }
+
+.scheme-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--fg-bar);
+  border-radius: 2px;
+}
+
+/* ─── Theme list / editor screens ──────────────────────────────────────── */
+#theme-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.theme-row:hover { background: var(--bg-bar); }
+.theme-row-swatches { display: flex; gap: 2px; }
+.theme-row-swatches .scheme-swatch { width: 14px; height: 14px; }
+.theme-row-name { flex: 1; }
+.theme-row-active { color: var(--heading); }
+.theme-row-actions { display: flex; gap: 2px; }
+.theme-row-actions button { padding: 1px 7px; }
+
+#theme-editor-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 4px 12px; }
+#theme-tabs { display: flex; gap: 4px; margin: 8px 0; }
+#theme-tabs button.active { color: var(--fg); border-color: var(--heading); }
+
+.theme-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.theme-color-label { width: 96px; font-size: 0.85em; color: var(--fg-bar); flex-shrink: 0; }
+.theme-color-hex { flex: 1; font-family: monospace; }
+.theme-color-hex.invalid { border-color: #d04a4a; }
+input[type="color"] { width: 32px; height: 28px; padding: 2px; border: 1px solid var(--fg-bar); background: var(--bg-bar); }
+
+#theme-dup-body { padding: 8px 20px 4px; display: flex; flex-direction: column; gap: 4px; }
+#settings-id-preview { padding: 8px 0 0; }
+
+/* ─── Dialogs ───────────────────────────────────────────────────────────── */
+dialog {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--fg-bar);
+  padding: 0;
+  width: min(480px, 92vw);
+  max-height: 82vh;
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+
+#close-confirm-msg { padding: 16px 20px 4px; }
+.dlg-btn-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
+
+/* ─── Editor ───────────────────────────────────────────────────────────── */
+#editor-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+#editor-screen[hidden] { display: none; }
+
+#ed-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#editor-title {
+  flex: 1;
+  font-size: 1.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#ed-actions { display: flex; gap: 6px; align-items: center; }
+
+.editor-badge {
+  display: inline-block;
+  min-width: 14px;
+  padding: 0 3px;
+  margin-right: 3px;
+  border-radius: 8px;
+  background: var(--heading);
+  color: var(--bg);
+  font-size: 0.7em;
+  line-height: 16px;
+  text-align: center;
+}
+
+#editor-menu-wrap { position: relative; }
+#editor-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: var(--bg-bar);
+  border: 1px solid var(--fg-bar);
+  z-index: 100;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+}
+#editor-menu[hidden] { display: none; }
+#editor-menu button {
+  display: block;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  white-space: nowrap;
+}
+#editor-menu button:hover { background: var(--bg-sel); }
+#editor-menu button[hidden] { display: none; }
+
+#ed-body {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+#ed-wrap { position: absolute; inset: 0; }
+#ed-wrap[hidden] { display: none; }
+
+#ed-highlight,
+#ed-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  font-family: var(--ed-font-family);
+  font-size: var(--ed-font-size);
+  line-height: var(--ed-line-spacing);
+  padding: var(--ed-margin-y) var(--ed-margin-x);
+  margin: 0;
+  border: none;
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  tab-size: 4;
+}
+#ed-highlight {
+  background: transparent;
+  color: var(--fg);
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+}
+#ed-input {
+  background: transparent;
+  color: transparent;
+  caret-color: var(--fg);
+  resize: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  z-index: 1;
+}
+#ed-input::selection { background: var(--bg-sel); color: var(--fg); }
+
+.hl-line { display: inline-block; width: 100%; min-height: 1lh; vertical-align: top; }
+.hl-heading { color: var(--heading); }
+.hl-h1 { font-size: 1.8em; line-height: calc(var(--ed-line-spacing) / 1.8); }
+.hl-h2 { font-size: 1.6em; line-height: calc(var(--ed-line-spacing) / 1.6); }
+.hl-h3 { font-size: 1.4em; line-height: calc(var(--ed-line-spacing) / 1.4); }
+.hl-h4 { font-size: 1.2em; line-height: calc(var(--ed-line-spacing) / 1.2); }
+.hl-comment { color: var(--comment); }
+.hl-markup { color: var(--markup); }
+
+#ed-preview {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--ed-margin-y) var(--ed-margin-x);
+  font-family: var(--ed-font-family);
+  font-size: var(--ed-font-size);
+  line-height: var(--ed-line-spacing);
+}
+#ed-preview[hidden] { display: none; }
+#ed-preview h1, #ed-preview h2, #ed-preview h3,
+#ed-preview h4, #ed-preview h5, #ed-preview h6 { color: var(--heading); margin: 0.6em 0 0.3em; }
+#ed-preview p { margin: 0.4em 0; }
+#ed-preview code, #ed-preview .t2t-code { background: var(--bg-bar); }
+#ed-preview .t2t-code { display: block; padding: 8px; overflow-x: auto; }
+#ed-preview code { padding: 1px 4px; }
+#ed-preview a { color: var(--markup); }
+#ed-preview .zk-link { color: var(--markup); text-decoration: underline dotted; }
+#ed-preview a.zk-link { cursor: pointer; }
+#ed-preview .t2t-image-placeholder { color: var(--fg-bar); font-style: italic; }
+#ed-preview table { border-collapse: collapse; margin: 0.4em 0; }
+#ed-preview th, #ed-preview td { border: 1px solid var(--fg-bar); padding: 4px 8px; }
+#ed-preview hr { border: none; border-top: 1px solid var(--fg-bar); margin: 1em 0; }
+
+/* ─── Zettelkasten: link picker / backlinks / TOC (phases 5-6) ─────────── */
+#zklink-picker-dlg, #backlinks-dlg, #toc-dlg, #backup-restore-dlg { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#zklink-filter { margin: 8px 12px; }
+#zklink-list, #backlinks-list, #toc-list, #backup-restore-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+
+#rename-note-body { padding: 8px 20px; }
+#rename-note-input { width: 100%; }
+
+.backup-restore-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.backup-restore-item:hover { background: var(--bg-bar); }
+.backup-restore-date { flex-shrink: 0; font-size: 0.85em; }
+.backup-restore-name { color: var(--fg-bar); font-size: 0.8em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Shared two-line item: file name first, then the note's first detected
+   heading (if any) — never a redundant title/zkId, see editor.js
+   renderNoteItem(). */
+.zklink-item, .backlinks-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.zklink-item:hover, .backlinks-item:hover { background: var(--bg-bar); }
+.note-item-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-item-heading { font-size: 0.75em; color: var(--fg-bar); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+
+.toc-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toc-item:hover { background: var(--bg-bar); }
+
+/* ─── Repository options dialog ────────────────────────────────────────── */
+#repo-options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+}
+#repo-options-body { padding: 4px 12px 12px; }
+#repo-options-body .settings-row { border-bottom: none; }
+
+</style>
+</head>
+<body>
+
+<!-- Repository list screen -->
+<div id="repo-screen">
+  <div id="repo-header">
+    <span id="repo-title">Zettelium</span>
+    <button id="repo-settings-btn" title="Réglages">⚙</button>
+    <button id="repo-add-btn" title="Ajouter un dépôt (dossier)">+ Dépôt</button>
+  </div>
+  <p id="repo-empty-hint" class="hint" hidden>
+    Aucun dépôt enregistré. Un dossier est un dossier réel sur votre disque —
+    cliquez sur « + Dépôt » pour en choisir un.
+  </p>
+  <div id="repo-list"></div>
+  <p class="hint" id="repo-support-hint"></p>
+</div>
+
+<!-- Global settings screen -->
+<div id="settings-screen" hidden>
+  <div id="settings-header">
+    <button id="settings-back-btn" title="Retour">←</button>
+    <span>Réglages</span>
+  </div>
+  <div id="settings-body">
+    <p class="settings-section-title">Thème</p>
+    <label class="settings-row"><span>Palette de couleurs</span>
+      <select id="settings-scheme"></select>
+    </label>
+    <div id="settings-scheme-preview">
+      <div class="scheme-preview-row">
+        <span class="hint">Sombre</span>
+        <span id="settings-scheme-preview-dark" class="scheme-preview-swatches"></span>
+      </div>
+      <div class="scheme-preview-row">
+        <span class="hint">Clair</span>
+        <span id="settings-scheme-preview-light" class="scheme-preview-swatches"></span>
+      </div>
+    </div>
+    <button id="settings-edit-theme-btn" class="settings-full-width-btn">Modifier les couleurs</button>
+    <label class="settings-row"><input type="checkbox" id="settings-dark-mode"> <span>Mode sombre</span></label>
+
+    <p class="settings-section-title">Fichiers</p>
+    <label class="settings-row"><span>Extensions reconnues</span>
+      <input type="text" id="settings-extensions-input" autocomplete="off">
+    </label>
+    <label class="settings-row"><input type="checkbox" id="settings-extensions-all"> <span>Tous les fichiers (ignorer le filtre)</span></label>
+
+    <p class="settings-section-title">Zettelkasten</p>
+    <label class="settings-row"><span>Motif de détection d'ID (regex)</span>
+      <input type="text" id="settings-id-pattern" autocomplete="off">
+    </label>
+    <label class="settings-row"><span>Format de génération d'ID</span>
+      <input type="text" id="settings-id-format" autocomplete="off">
+    </label>
+    <p id="settings-id-preview" class="hint"></p>
+  </div>
+</div>
+
+<!-- Theme list screen -->
+<div id="theme-list-screen" hidden>
+  <div id="theme-list-header">
+    <button id="theme-list-back-btn" title="Retour">←</button>
+    <span>Thèmes</span>
+    <button id="theme-list-new-btn" title="Nouveau thème">+</button>
+  </div>
+  <div id="theme-list"></div>
+</div>
+
+<!-- Theme editor screen -->
+<div id="theme-editor-screen" hidden>
+  <div id="theme-editor-header">
+    <button id="theme-editor-back-btn" title="Annuler">←</button>
+    <span id="theme-editor-title"></span>
+  </div>
+  <div id="theme-editor-body">
+    <label class="settings-row"><span>Nom</span>
+      <input type="text" id="theme-editor-name" autocomplete="off">
+    </label>
+    <div id="theme-tabs">
+      <button id="theme-tab-dark" class="active">Sombre</button>
+      <button id="theme-tab-light">Clair</button>
+    </div>
+    <div id="theme-editor-colors"></div>
+  </div>
+  <div class="dlg-btn-row">
+    <button id="theme-editor-cancel">Annuler</button>
+    <button id="theme-editor-save">💾 Enregistrer</button>
+  </div>
+</div>
+
+<!-- Duplicate theme (name prompt) -->
+<dialog id="theme-dup-dlg">
+  <div id="theme-dup-header">
+    <span>Dupliquer le thème</span>
+  </div>
+  <div id="theme-dup-body">
+    <input type="text" id="theme-dup-name" autocomplete="off">
+    <p id="theme-dup-error" class="hint"></p>
+  </div>
+  <div class="dlg-btn-row">
+    <button id="theme-dup-cancel">Annuler</button>
+    <button id="theme-dup-create">Créer</button>
+  </div>
+</dialog>
+
+<!-- File browser screen (active repository) -->
+<div id="browser-screen" hidden>
+  <div id="browser-header">
+    <button id="browser-back-btn" title="Dossier parent (ou retour aux dépôts à la racine)">←</button>
+    <span id="browser-title"></span>
+    <button id="browser-options-btn" title="Options du dépôt">⋮</button>
+    <button id="browser-repair-btn" title="Réparer les liens Zettelkasten de ce dépôt">🔗</button>
+    <button id="browser-refresh-btn" title="Rafraîchir la liste">⟳</button>
+    <button id="browser-settings-btn" title="Réglages">⚙</button>
+  </div>
+  <div id="browser-search-bar">
+    <div id="browser-search-mode">
+      <button data-mode="name" class="active">Nom</button>
+      <button data-mode="content">Contenu</button>
+      <button data-mode="tag">#Tag</button>
+    </div>
+    <input type="text" id="browser-search-input" placeholder="Rechercher…" autocomplete="off">
+    <button id="browser-sort-btn" title="Trier par nom">🔤</button>
+  </div>
+  <p id="browser-empty-hint" class="hint" hidden>
+    Aucun fichier reconnu comme note dans ce dépôt.
+  </p>
+  <div id="browser-list"></div>
+</div>
+
+<!-- Repository options -->
+<dialog id="repo-options-dlg">
+  <div id="repo-options-header">
+    <span>Options du dépôt</span>
+    <button id="repo-options-close" title="Fermer">✕</button>
+  </div>
+  <div id="repo-options-body">
+    <label class="settings-row"><input type="checkbox" id="repo-options-include-extension"> <span>Inclure l'extension dans les liens [[…]]</span></label>
+  </div>
+</dialog>
+
+<!-- Editor screen -->
+<div id="editor-screen" hidden>
+  <div id="ed-header">
+    <button id="editor-back-btn" title="Fermer (retour au dépôt)">✕</button>
+    <span id="editor-title"></span>
+    <div id="ed-actions">
+      <button id="editor-toc-btn" title="Table des matières">📑</button>
+      <button id="editor-backlinks-btn" title="Notes qui font un lien vers celle-ci">
+        <span id="editor-backlinks-badge" class="editor-badge" hidden></span>⛓</button>
+      <button id="editor-preview-btn" title="Aperçu">👁</button>
+      <button id="editor-save-btn" title="Enregistrer (Ctrl+S)" disabled>💾</button>
+      <div id="editor-menu-wrap">
+        <button id="editor-menu-btn" title="Plus d'actions">⋮</button>
+        <div id="editor-menu" hidden>
+          <button id="editor-menu-insert-id">🔢 Insérer un ID Zettelkasten</button>
+          <button id="editor-menu-insert-link">🔗 Insérer un lien</button>
+          <button id="editor-menu-rename">✏️ Renommer</button>
+          <button id="editor-menu-backup-create">🕘 Créer une sauvegarde</button>
+          <button id="editor-menu-backup-restore">♻️ Restaurer une sauvegarde</button>
+          <button id="editor-menu-settings">⚙ Réglages</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="ed-body">
+    <div id="ed-wrap">
+      <pre id="ed-highlight" aria-hidden="true"></pre>
+      <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    </div>
+    <div id="ed-preview" hidden></div>
+  </div>
+</div>
+
+<!-- Save-before-closing confirmation (Yes = save & close, No = discard & close, Cancel = stay) -->
+<dialog id="close-confirm-dlg">
+  <p id="close-confirm-msg"></p>
+  <div class="dlg-btn-row">
+    <button id="close-confirm-yes">Enregistrer et fermer</button>
+    <button id="close-confirm-no">Fermer sans enregistrer</button>
+    <button id="close-confirm-cancel">Annuler</button>
+  </div>
+</dialog>
+
+<!-- Insert-link picker (filterable) -->
+<dialog id="zklink-picker-dlg">
+  <div id="zklink-picker-header">
+    <span>Insérer un lien</span>
+    <button id="zklink-picker-close" title="Fermer">✕</button>
+  </div>
+  <input type="text" id="zklink-filter" placeholder="Filtrer par nom, titre ou ID…" autocomplete="off">
+  <p id="zklink-empty-hint" class="hint" hidden>Aucune note avec un ID Zettelkasten ne correspond.</p>
+  <div id="zklink-list"></div>
+</dialog>
+
+<!-- Backlinks panel -->
+<dialog id="backlinks-dlg">
+  <div id="backlinks-header">
+    <span>Notes qui font un lien vers celle-ci</span>
+    <button id="backlinks-close" title="Fermer">✕</button>
+  </div>
+  <p id="backlinks-empty-hint" class="hint" hidden>Aucune note ne référence celle-ci pour l'instant.</p>
+  <div id="backlinks-list"></div>
+</dialog>
+
+<!-- Table of contents -->
+<dialog id="toc-dlg">
+  <div id="toc-header">
+    <span>Table des matières</span>
+    <button id="toc-close" title="Fermer">✕</button>
+  </div>
+  <p id="toc-empty-hint" class="hint" hidden>Aucun titre détecté dans cette note.</p>
+  <div id="toc-list"></div>
+</dialog>
+
+<!-- Rename note -->
+<dialog id="rename-note-dlg">
+  <div id="rename-note-header">
+    <span>Renommer</span>
+  </div>
+  <div id="rename-note-body">
+    <input type="text" id="rename-note-input" autocomplete="off">
+  </div>
+  <div class="dlg-btn-row">
+    <button id="rename-note-cancel">Annuler</button>
+    <button id="rename-note-confirm">💾 Renommer</button>
+  </div>
+</dialog>
+
+<!-- Restore backup -->
+<dialog id="backup-restore-dlg">
+  <div id="backup-restore-header">
+    <span>Restaurer une sauvegarde</span>
+    <button id="backup-restore-close" title="Fermer">✕</button>
+  </div>
+  <p id="backup-restore-empty-hint" class="hint" hidden>Aucune sauvegarde pour cette note.</p>
+  <div id="backup-restore-list"></div>
+</dialog>
+
+<script>
+'use strict';
+// Color scheme definitions — ported from src/schemes/*.tcl
+// Each scheme: dark (primary) + light (alt) color sets
+const SCHEMES = {
+  default: {
+    bg:'#1a1a1a', fg:'#e8e8e8', bgBar:'#2a2a2a', fgBar:'#aaaaaa', bgSel:'#3a5a8a',
+    heading:'#c8a060', comment:'#606060', markup:'#6aa9d4', bg2:'#1a1a1a',
+    bgAlt:'#fdf6e3', fgAlt:'#657b83', bgBarAlt:'#eee8d5', fgBarAlt:'#93a1a1',
+    bgSelAlt:'#e6ddb9', headingAlt:'#b58900', commentAlt:'#aaaaaa', markupAlt:'#2a7090', bg2Alt:'#fdf6e3'
+  },
+  solarized: {
+    bg:'#002b36', fg:'#839496', bgBar:'#073642', fgBar:'#586e75', bgSel:'#004555',
+    heading:'#b58900', comment:'#586e75', markup:'#268bd2', bg2:'#002b36',
+    bgAlt:'#fdf6e3', fgAlt:'#657b83', bgBarAlt:'#eee8d5', fgBarAlt:'#93a1a1',
+    bgSelAlt:'#e6ddb9', headingAlt:'#b58900', commentAlt:'#93a1a1', markupAlt:'#268bd2', bg2Alt:'#fdf6e3'
+  },
+  gruvbox: {
+    bg:'#282828', fg:'#ebdbb2', bgBar:'#1d2021', fgBar:'#a89984', bgSel:'#504945',
+    heading:'#fabd2f', comment:'#928374', markup:'#83a598', bg2:'#282828',
+    bgAlt:'#fbf1c7', fgAlt:'#3c3836', bgBarAlt:'#ebdbb2', fgBarAlt:'#7c6f64',
+    bgSelAlt:'#d5c4a1', headingAlt:'#b57614', commentAlt:'#a89984', markupAlt:'#076678', bg2Alt:'#fbf1c7'
+  },
+  everforest: {
+    bg:'#2b3339', fg:'#d3c6aa', bgBar:'#1e2326', fgBar:'#a7c080', bgSel:'#3a464c',
+    heading:'#a7c080', comment:'#7a8478', markup:'#7fbbb3', bg2:'#2b3339',
+    bgAlt:'#fdf6e3', fgAlt:'#5c6a72', bgBarAlt:'#efead4', fgBarAlt:'#8da101',
+    bgSelAlt:'#e6e2cc', headingAlt:'#8da101', commentAlt:'#a6b0a0', markupAlt:'#3a94c5', bg2Alt:'#fdf6e3'
+  },
+  nord: {
+    bg:'#2e3440', fg:'#d8dee9', bgBar:'#3b4252', fgBar:'#81a1c1', bgSel:'#434c5e',
+    heading:'#88c0d0', comment:'#4c566a', markup:'#8fbec0', bg2:'#2e3440',
+    bgAlt:'#eceff4', fgAlt:'#2e3440', bgBarAlt:'#e5e9f0', fgBarAlt:'#5e81ac',
+    bgSelAlt:'#d8dee9', headingAlt:'#5e81ac', commentAlt:'#4c566a', markupAlt:'#5e81ac', bg2Alt:'#eceff4'
+  },
+  alt01: {
+    bg:'#1a1214', fg:'#e8dcc8', bgBar:'#241820', fgBar:'#9e8878', bgSel:'#521828',
+    heading:'#e63060', comment:'#6e5858', markup:'#c24868', bg2:'#1a1214',
+    bgAlt:'#fffde9', fgAlt:'#363c42', bgBarAlt:'#eee8d5', fgBarAlt:'#93a1a1',
+    bgSelAlt:'#f0e7c1', headingAlt:'#c8064a', commentAlt:'#aaaaaa', markupAlt:'#7e1c3e', bg2Alt:'#fffde9'
+  },
+  alt02: {
+    bg:'#2a2520', fg:'#d4c4b0', bgBar:'#2a2520', fgBar:'#c4b4a0', bgSel:'#4a4035',
+    heading:'#e8a87c', comment:'#6a5a50', markup:'#c49070', bg2:'#2a2520',
+    bgAlt:'#f5f0eb', fgAlt:'#3a2a20', bgBarAlt:'#e8e0d8', fgBarAlt:'#3a2a20',
+    bgSelAlt:'#e0d4c8', headingAlt:'#a65d2b', commentAlt:'#a89080', markupAlt:'#8b5a3c', bg2Alt:'#f5f0eb'
+  },
+  retro: {
+    bg:'#0a0a0a', fg:'#33ff33', bgBar:'#111111', fgBar:'#22bb22', bgSel:'#004400',
+    heading:'#aaffaa', comment:'#1a661a', markup:'#00ffcc', bg2:'#0a0a0a',
+    bgAlt:'#ffffff', fgAlt:'#000000', bgBarAlt:'#e0e0e0', fgBarAlt:'#333333',
+    bgSelAlt:'#d0d0d0', headingAlt:'#000000', commentAlt:'#999999', markupAlt:'#333333', bg2Alt:'#ffffff'
+  }
+};
+
+// User-defined custom schemes (loaded from IndexedDB, merged at runtime)
+let customSchemes = {};
+
+function getScheme(name) {
+  return customSchemes[name] || SCHEMES[name] || SCHEMES.default;
+}
+
+function getAllSchemeNames() {
+  return [...Object.keys(SCHEMES), ...Object.keys(customSchemes)];
+}
+
+
+'use strict';
+// IndexedDB wrapper — promise-based, adapted from writhdeck-web/src/db.js.
+//
+// Unlike writhdeck-web's flat `documents` store, zettelium-web has no
+// document store of its own: notes live exclusively in the user's file
+// system, reached through the repositories below (see PLAN.md section 2).
+// This module only persists the *registry* of repositories (each holding a
+// FileSystemDirectoryHandle — structured-cloneable, so it survives a
+// IndexedDB round-trip) and global app settings/meta.
+const Storage = (() => {
+  const DB_NAME = 'zettelium';
+  const DB_VER  = 1;
+  let _db = null;
+
+  function open() {
+    if (_db) return Promise.resolve(_db);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VER);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('repositories')) {
+          db.createObjectStore('repositories', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('meta')) {
+          db.createObjectStore('meta', { keyPath: 'key' });
+        }
+      };
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror   = e => reject(e.target.error);
+    });
+  }
+
+  function tx(store, mode, fn) {
+    return open().then(db => new Promise((resolve, reject) => {
+      const t = db.transaction(store, mode);
+      const s = t.objectStore(store);
+      const req = fn(s);
+      t.oncomplete = () => resolve(req ? req.result : undefined);
+      t.onerror    = e => reject(e.target.error);
+    }));
+  }
+
+  function getAllRepositories() {
+    return tx('repositories', 'readonly', s => s.getAll());
+  }
+  function putRepository(repo) {
+    return tx('repositories', 'readwrite', s => s.put(repo));
+  }
+  function deleteRepository(id) {
+    return tx('repositories', 'readwrite', s => s.delete(id));
+  }
+
+  function getMeta(key) {
+    return tx('meta', 'readonly', s => s.get(key)).then(r => r ? r.value : undefined);
+  }
+  function setMeta(key, value) {
+    return tx('meta', 'readwrite', s => s.put({ key, value }));
+  }
+
+  return { getAllRepositories, putRepository, deleteRepository, getMeta, setMeta };
+})();
+
+
+'use strict';
+// File System Access API helpers.
+//
+// This is the central storage mechanism for zettelium-web (see PLAN.md
+// section 2) — unlike writhdeck-web, where the equivalent API only backs an
+// optional secondary "watched folder" feature on top of a flat IndexedDB
+// document store. Chromium-only (Chrome/Edge/Brave); assumed, no fallback
+// for Firefox/Safari (see PLAN.md section 2, "Support navigateur").
+const FSA = (() => {
+  function supported() {
+    return typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+  }
+
+  // Must be called directly from a user gesture (click handler) — awaiting
+  // anything else first can make the browser reject the picker call.
+  async function pickDirectory() {
+    return await window.showDirectoryPicker({ mode: 'readwrite' });
+  }
+
+  // Silent check only (no prompt) — a directory handle persisted in
+  // IndexedDB is never guaranteed to still be usable across sessions/browser
+  // restarts (PLAN.md section 9). Returns 'granted' | 'denied' | 'prompt'.
+  async function queryPermission(handle, mode = 'readwrite') {
+    if (!handle.queryPermission) return 'granted';
+    return await handle.queryPermission({ mode });
+  }
+
+  // Prompts the user — must be called from a user gesture, used to
+  // re-authorize a repository whose queryPermission() came back non-granted.
+  async function requestPermission(handle, mode = 'readwrite') {
+    if (!handle.requestPermission) return 'granted';
+    return await handle.requestPermission({ mode });
+  }
+
+  function isNoteFileName(name, extensions, filterDisabled) {
+    if (filterDisabled) return true;
+    const lower = name.toLowerCase();
+    return extensions.some(ext => lower.endsWith(ext));
+  }
+
+  // Directory name excluded from browsing and indexing — timestamped copies
+  // (backup.js) would otherwise show up as ordinary notes. Matches
+  // zettelium-android's `SafRepositoryAccess.BACKUPS_DIR_NAME`.
+  const BACKUPS_DIR_NAME = 'backups';
+
+  // Lists the note files AND subfolders directly inside `dirHandle` — one
+  // level, no recursion (phase 6: subfolder navigation in the browser, see
+  // browser.js's `State.dirStack`). `path` is repo-relative (`prefix + name`,
+  // `prefix` being the path of `dirHandle` itself, e.g. `"sub/"` — `""` at
+  // the repo root) — same `path`-keyed identity as `listNoteFilesRecursive`
+  // below, so a file looks the same to `index.js`/`editor.js` whether it
+  // came from browsing or from a recursive scan.
+  async function listChildren(dirHandle, extensions, filterDisabled, prefix = '') {
+    const files = [];
+    const subdirs = [];
+    for await (const [name, handle] of dirHandle.entries()) {
+      if (handle.kind === 'directory') {
+        if (name === BACKUPS_DIR_NAME) continue;
+        subdirs.push({ path: prefix + name + '/', name, handle });
+        continue;
+      }
+      if (handle.kind !== 'file') continue;
+      if (!isNoteFileName(name, extensions, filterDisabled)) continue;
+      const file = await handle.getFile();
+      files.push({ path: prefix + name, name, fileHandle: handle, lastModified: file.lastModified, size: file.size });
+    }
+    files.sort((a, b) => a.name.localeCompare(b.name));
+    subdirs.sort((a, b) => a.name.localeCompare(b.name));
+    return { files, subdirs };
+  }
+
+  // Full recursive listing (subfolders included) — for the phase 4 indexer,
+  // which must cover the whole repository tree for search/tags/backlinks
+  // even though the browser UI itself stays flat until phase 6 (mirrors
+  // zettelium-android: `Indexer` got `listAllNoteFilesRecursive` in round
+  // 11bis, ahead of the browser's own subfolder navigation). `path` is the
+  // repo-relative path (POSIX-style, e.g. "sub/note.txt"), `name` is the
+  // bare filename — distinct because two files in different subfolders can
+  // share the same `name`.
+  async function listNoteFilesRecursive(dirHandle, extensions, filterDisabled, prefix = '') {
+    const files = [];
+    for await (const [name, handle] of dirHandle.entries()) {
+      if (handle.kind === 'directory') {
+        if (name === BACKUPS_DIR_NAME) continue;
+        const nested = await listNoteFilesRecursive(handle, extensions, filterDisabled, `${prefix}${name}/`);
+        files.push(...nested);
+        continue;
+      }
+      if (handle.kind !== 'file') continue;
+      if (!isNoteFileName(name, extensions, filterDisabled)) continue;
+      const file = await handle.getFile();
+      files.push({ path: prefix + name, name, fileHandle: handle, lastModified: file.lastModified, size: file.size });
+    }
+    files.sort((a, b) => a.path.localeCompare(b.path));
+    return files;
+  }
+
+  async function readFileText(fileHandle) {
+    const file = await fileHandle.getFile();
+    return await file.text();
+  }
+
+  // Walks down from `rootHandle` following `path` (e.g. "sub/sub2/note.txt"
+  // or "sub/sub2/", trailing filename or slash both fine — only the
+  // directory segments are used) to the directory that contains it.
+  async function getParentDirHandle(rootHandle, path) {
+    const parts = path.split('/').filter(Boolean);
+    parts.pop(); // drop the filename (or the trailing empty segment for a folder path)
+    let dir = rootHandle;
+    for (const part of parts) {
+      dir = await dir.getDirectoryHandle(part);
+    }
+    return dir;
+  }
+
+  // Renames a note file. `FileSystemHandle.move(newName)` (stable in recent
+  // Chromium) renames in place — same handle, same identity, no content
+  // read/rewrite needed, mirroring the true rename `SafRepositoryAccess`
+  // gets from `DocumentsContract.renameDocument` on Android. Falls back to
+  // copy+delete (new handle) for older Chromium without `move()` support.
+  // Returns the (possibly new) FileSystemFileHandle for the renamed file.
+  async function renameFile(fileHandle, parentDirHandle, newName) {
+    if (typeof fileHandle.move === 'function') {
+      await fileHandle.move(newName);
+      return fileHandle;
+    }
+    const content = await readFileText(fileHandle);
+    const newHandle = await parentDirHandle.getFileHandle(newName, { create: true });
+    const writable = await newHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    await parentDirHandle.removeEntry(fileHandle.name);
+    return newHandle;
+  }
+
+  return {
+    supported, pickDirectory, queryPermission, requestPermission,
+    isNoteFileName, listChildren, listNoteFilesRecursive, readFileText,
+    getParentDirHandle, renameFile, BACKUPS_DIR_NAME
+  };
+})();
+
+
+'use strict';
+// Regex bank for the txt2tags syntax — ported from zettelium-android's
+// `parser/Txt2TagsRegexes.kt` (itself ported from `txt2tags3_mod/regexes.py`,
+// see PLAN.md section 6). Single source of truth for syntax recognition,
+// used by both the block/inline parser (parser.js/inline.js) and the
+// editor's syntax highlighting (../highlight.js) — never duplicate a pattern
+// ad hoc elsewhere (same rule as the Kotlin original).
+//
+// None of these regexes carry the 'g'/'i' flags (except where the Kotlin
+// source used IGNORE_CASE) — `.exec()`/`.test()` on a flagless RegExp always
+// searches fresh from index 0, matching Kotlin's stateless `Regex.find()`.
+// Callers needing global iteration (highlight.js) make their own 'g'-flagged
+// copies rather than mutating these.
+const Txt2TagsRegexes = (() => {
+  // --- Délimiteurs de blocs ---------------------------------------------
+  const blockVerbOpen = /^```\s*$/;
+  const blockVerbClose = blockVerbOpen;
+  const blockRawOpen = /^"""\s*$/;
+  const blockRawClose = blockRawOpen;
+  const blockTaggedOpen = /^'''\s*$/;
+  const blockTaggedClose = blockTaggedOpen;
+  const blockCommentOpen = /^%%%\s*$/;
+  const blockCommentClose = blockCommentOpen;
+
+  const oneLineVerb = /^``` (?=.)/;
+  const oneLineRaw = /^""" (?=.)/;
+  const oneLineTagged = /^''' (?=.)/;
+
+  // --- Formatage inline ---------------------------------------------------
+  // Les marques doivent coller au contenu (pas d'espace en bordure) ; elles
+  // sont gourmandes, donc dans ****gras****, ça devient **<b>gras</b>**.
+  const fontMono = /``([^\s](?:.*?[^\s])?`*)``/;
+  const raw = /""([^\s](?:.*?[^\s])?"*)""/;
+  const tagged = /''([^\s](?:.*?[^\s])?'*)''/;
+  const math = /\$\$([^\s](?:.*?[^\s])?\$*)\$\$/;
+  const fontBold = /\*\*([^\s](?:.*?[^\s])?\**)\*\*/;
+  const fontItalic = /\/\/([^\s](?:.*?[^\s])?\/*)\/\//;
+  const fontUnderline = /__([^\s](?:.*?[^\s])?_*)__/;
+  const fontStrike = /--([^\s](?:.*?[^\s])?-*)--/;
+
+  // --- Listes -------------------------------------------------------------
+  const list = /^( *)(-) (?=[^ ])/;
+  const numlist = /^( *)(\+) (?=[^ ])/;
+  const deflist = /^( *)(:) (.*)$/;
+  const listClose = /^( *)([-+:])\s*$/;
+
+  // --- Divers blocs --------------------------------------------------------
+  const bar = /^(\s*)([_=-]{20,})\s*$/;
+  const table = /^ *\|([|_/])? /;
+  const blankLine = /^\s*$/;
+  const comment = /^%/;
+
+  // Extension Zettelium (pas dans txt2tags d'origine) : titres markdown ATX,
+  // en plus des titres txt2tags — voir CLAUDE.md, "Décisions structurantes".
+  const markdownHeading = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
+
+  // --- Titres txt2tags -----------------------------------------------------
+  // "= Titre =" (numéroté) et "+ Titre +" (non numéroté), niveaux 1 à 5,
+  // avec label optionnel "[mon-id]". Les marqueurs ouvrant/fermant doivent
+  // avoir exactement la même longueur (backreference \1).
+  const title = /^ *(={1,5})([^=](?:.*[^=])?)\1(?:\[([\w-]*)\])?\s*$/;
+  const numtitle = /^ *(\+{1,5})([^+](?:.*[^+])?)\1(?:\[([\w-]*)\])?\s*$/;
+
+  // --- Liens, images, emails ------------------------------------------------
+  // Portage direct des fragments d'URL de regexes.py (urlskel). String.raw
+  // évite le piège du double-échappement (une chaîne JS normale interprète
+  // \b/\d comme des séquences d'échappement de chaîne, pas comme du regex).
+  const URL_PROTO = String.raw`(https?|ftp|news|telnet|gopher|wais)://`;
+  const URL_GUESS = String.raw`(www[23]?|ftp)\.`;
+  const URL_LOGIN = String.raw`A-Za-z0-9_.-`;
+  const URL_PASS = String.raw`[^ @]*`;
+  const URL_CHARS = String.raw`A-Za-z0-9%._/~:,=$@&+-`;
+  const URL_ANCHOR = String.raw`A-Za-z0-9%._-`;
+  const URL_FORM = String.raw`A-Za-z0-9/%&=+:;.,$@*_-`;
+
+  // [image.ext] — groupe nommé "path".
+  const PATT_IMG = String.raw`\[(?<path>[\w_,.+%$#@!?+~/-]+\.(?:png|jpe?g|gif|eps|bmp|svg))\]`;
+
+  // nom[:mot_de_passe] @
+  const urlLoginPatt = `([${URL_LOGIN}]+(:${URL_PASS})?@)?`;
+
+  // [ http:// ] [ user:pass@ ] domaine.com [ / ] [ #ancre | ?form=data ]
+  const retxtUrl =
+    String.raw`\b(${URL_PROTO}${urlLoginPatt}|${URL_GUESS})[${URL_CHARS}]+\b/*(\?[${URL_FORM}]+)?(#[${URL_ANCHOR}]*)?`;
+
+  // fichier | [fichier] #ancre
+  const retxtUrlLocal = `[${URL_CHARS}]+|[${URL_CHARS}]*(#[${URL_ANCHOR}]*)`;
+
+  // user@domaine [ ?form=data ]
+  const pattEmail = String.raw`\b[${URL_LOGIN}]+@([A-Za-z0-9_-]+\.)+[A-Za-z]{2,4}\b(\?[${URL_FORM}]+)?`;
+
+  const email = new RegExp(pattEmail, 'i');
+  const link = new RegExp(`${retxtUrl}|${pattEmail}`, 'i');
+
+  // [ label  url|email|fichier ] — groupes nommés "label"/"link". Simplification vs.
+  // txt2tags d'origine : le label ne peut pas être lui-même une image imbriquée
+  // (`[[img.png] url]`), cas rare non supporté ici (voir SKILLS.md).
+  const linkmark = new RegExp(
+    String.raw`\[(?<label>[^\]]+) (?<link>${retxtUrl}|${pattEmail}|${retxtUrlLocal})\]`, 'i');
+  const img = new RegExp(PATT_IMG, 'i');
+
+  // [[ cible | zkId ]] — convention Zettelium (pas de la syntaxe txt2tags d'origine),
+  // voir zettelkasten.js. Double crochets + `|`, jamais confondu avec `linkmark`
+  // (qui exige un espace, pas de `|`) ni `img` (crochets simples).
+  const zkLink = /\[\[(?<target>[^\]|]*)\|(?<zkId>[^\]]*)\]\]/;
+
+  return {
+    blockVerbOpen, blockVerbClose, blockRawOpen, blockRawClose,
+    blockTaggedOpen, blockTaggedClose, blockCommentOpen, blockCommentClose,
+    oneLineVerb, oneLineRaw, oneLineTagged,
+    fontMono, raw, tagged, math, fontBold, fontItalic, fontUnderline, fontStrike,
+    list, numlist, deflist, listClose,
+    bar, table, blankLine, comment, markdownHeading,
+    title, numtitle,
+    email, link, linkmark, img, zkLink,
+  };
+})();
+
+
+'use strict';
+// AST produced by parser.js: a document is an array of Block. Ported from
+// zettelium-android's `parser/Txt2TagsAst.kt` — Kotlin's sealed
+// interfaces/data classes become plain objects with a `type` discriminant
+// (JS has no sealed types), everything else (field names, shape) mirrors
+// the Kotlin 1:1.
+
+// --- Inline --------------------------------------------------------------
+function Text(text) { return { type: 'Text', text }; }
+function Bold(children) { return { type: 'Bold', children }; }
+function Italic(children) { return { type: 'Italic', children }; }
+function Underline(children) { return { type: 'Underline', children }; }
+function Strike(children) { return { type: 'Strike', children }; }
+
+// Code inline (`` `code` ``) — contenu verbatim, jamais reparsé.
+function Mono(text) { return { type: 'Mono', text }; }
+// Texte "brut" (`""texte""`) — passe-plat verbatim, rendu comme texte simple.
+function RawInline(text) { return { type: 'RawInline', text }; }
+// Texte "tagué" (`''texte''`) — verbatim, rendu comme texte simple.
+function TaggedInline(text) { return { type: 'TaggedInline', text }; }
+
+function Link(label, target) { return { type: 'Link', label, target }; }
+// Lien Zettelkasten `[[cible|zkId]]` — voir zettelkasten.js (phase 5).
+function ZkLink(target, zkId) { return { type: 'ZkLink', target, zkId }; }
+function Image(path) { return { type: 'Image', path }; }
+
+// --- Block -----------------------------------------------------------------
+function Heading(level, inlines, label = null, numbered = true) {
+  return { type: 'Heading', level, inlines, label, numbered };
+}
+function Paragraph(inlines) { return { type: 'Paragraph', inlines }; }
+
+// Ligne(s) de commentaire (`% ...` ou bloc `%%% ... %%%`) — jamais rendues.
+function Comment(lines) { return { type: 'Comment', lines }; }
+
+function HorizontalRule(marker) { return { type: 'HorizontalRule', marker }; }
+
+// kind: 'verbatim' | 'raw' | 'tagged' (CodeBlockKind Kotlin enum -> string).
+function CodeBlock(lines, kind) { return { type: 'CodeBlock', lines, kind }; }
+
+function ListItem(inlines, children = []) { return { inlines, children }; }
+function ListNode(ordered, items) { return { type: 'ListNode', ordered, items }; }
+
+function DefinitionItem(term, description) { return { term, description }; }
+function DefinitionList(items) { return { type: 'DefinitionList', items }; }
+
+function TableCell(inlines) { return { inlines }; }
+function TableRow(cells, isHeader) { return { cells, isHeader }; }
+function Table(rows) { return { type: 'Table', rows }; }
+
+
+'use strict';
+// Parseur inline txt2tags — ported from zettelium-android's
+// `parser/Txt2TagsInline.kt`. Transforme le texte d'une ligne logique en
+// liste d'Inline en cherchant, à chaque position, le construit reconnu le
+// plus à gauche parmi tous les types (lien-marque, image, autolien,
+// mono/raw/tagged, gras/italique/souligné/barré) — permet l'imbrication
+// (gras contenant de l'italique, etc.).
+//
+// Cas "répétition gourmande" (`****bold****` -> gras contenant le texte
+// littéral `**bold**`) : en reparsant le contenu capturé d'une marque, cette
+// même marque est exclue de la recherche à ce niveau de récursion (le
+// paramètre `exclude`) — sinon `**bold**` capturé par le `**` externe serait
+// aussitôt réinterprété comme un gras imbriqué.
+const Txt2TagsInline = (() => {
+  function parse(text, exclude = null) {
+    if (!text) return [];
+    const result = [];
+    let pos = 0;
+    while (pos < text.length) {
+      const remaining = text.slice(pos);
+      const candidate = findEarliest(remaining, exclude);
+      if (!candidate) {
+        result.push(Text(remaining));
+        break;
+      }
+      if (candidate.start > 0) {
+        result.push(Text(remaining.slice(0, candidate.start)));
+      }
+      result.push(candidate.inline);
+      pos += candidate.end; // end is relative to `remaining`, one past the match
+    }
+    return coalesceText(result);
+  }
+
+  function findEarliest(text, exclude) {
+    let best = null; // { start, end, inline }
+    function consider(regex, m, build) {
+      if (!m || regex === exclude) return;
+      const start = m.index;
+      if (best === null || start < best.start) {
+        best = { start, end: start + m[0].length, inline: build(m) };
+      }
+    }
+
+    consider(Txt2TagsRegexes.zkLink, Txt2TagsRegexes.zkLink.exec(text), m =>
+      ZkLink(m.groups.target ?? '', m.groups.zkId ?? ''));
+    consider(Txt2TagsRegexes.linkmark, Txt2TagsRegexes.linkmark.exec(text), m =>
+      Link(parse(m.groups.label ?? ''), m.groups.link ?? ''));
+    consider(Txt2TagsRegexes.img, Txt2TagsRegexes.img.exec(text), m =>
+      Image(m.groups.path ?? ''));
+    consider(Txt2TagsRegexes.link, Txt2TagsRegexes.link.exec(text), m =>
+      Link([Text(m[0])], m[0]));
+    consider(Txt2TagsRegexes.fontMono, Txt2TagsRegexes.fontMono.exec(text), m => Mono(m[1]));
+    consider(Txt2TagsRegexes.raw, Txt2TagsRegexes.raw.exec(text), m => RawInline(m[1]));
+    consider(Txt2TagsRegexes.tagged, Txt2TagsRegexes.tagged.exec(text), m => TaggedInline(m[1]));
+    consider(Txt2TagsRegexes.fontBold, Txt2TagsRegexes.fontBold.exec(text), m =>
+      Bold(parse(m[1], Txt2TagsRegexes.fontBold)));
+    consider(Txt2TagsRegexes.fontItalic, Txt2TagsRegexes.fontItalic.exec(text), m =>
+      Italic(parse(m[1], Txt2TagsRegexes.fontItalic)));
+    consider(Txt2TagsRegexes.fontUnderline, Txt2TagsRegexes.fontUnderline.exec(text), m =>
+      Underline(parse(m[1], Txt2TagsRegexes.fontUnderline)));
+    consider(Txt2TagsRegexes.fontStrike, Txt2TagsRegexes.fontStrike.exec(text), m =>
+      Strike(parse(m[1], Txt2TagsRegexes.fontStrike)));
+
+    return best;
+  }
+
+  function coalesceText(inlines) {
+    const out = [];
+    for (const inline of inlines) {
+      const last = out[out.length - 1];
+      if (inline.type === 'Text' && last && last.type === 'Text') {
+        out[out.length - 1] = Text(last.text + inline.text);
+      } else {
+        out.push(inline);
+      }
+    }
+    return out;
+  }
+
+  return { parse };
+})();
+
+
+'use strict';
+// Parseur bloc txt2tags — ported from zettelium-android's
+// `parser/Txt2TagsParser.kt`. Scanner ligne par ligne (machine à états, pas
+// de récursif descendant — voir CLAUDE.md), inspiré de l'architecture de
+// `txt2tags3_mod/processing.py` mais produisant l'AST partagé (ast.js).
+//
+// Simplifications assumées, héritées du Kotlin (voir PLAN.md section 6) :
+//  - pas de bloc "quote" (indentation par tabulation) ;
+//  - pas de continuation multi-ligne dans un item de liste ;
+//  - listes de définition (`: terme`) : la description n'est pas supportée ;
+//  - tableaux : pas de colspan, pas d'alignement par cellule, pas d'en-têtes
+//    verticaux (`|_`, `|/`) ;
+//  - pas de macros (`%%macroname`, `%%toc`) : les lignes `%%...` sont
+//    traitées comme des commentaires simples.
+const Txt2TagsParser = (() => {
+  function parse(source) {
+    return new Session().parse(source);
+  }
+
+  class OpenList {
+    constructor(indent, ordered, isDef) {
+      this.indent = indent;
+      this.ordered = ordered;
+      this.isDef = isDef;
+      this.items = []; // ItemBuilder[]
+    }
+  }
+
+  class ItemBuilder {
+    constructor(inlines) {
+      this.inlines = inlines;
+      this.children = [];
+    }
+  }
+
+  class Session {
+    constructor() {
+      this.blocks = [];
+      this.paragraphLines = [];
+      this.commentLines = [];
+      this.listStack = [];
+      this.tableRows = null;
+    }
+
+    parse(source) {
+      const lines = source.split('\n');
+      let i = 0;
+      while (i < lines.length) {
+        const line = lines[i];
+
+        if (Txt2TagsRegexes.blockCommentOpen.test(line)) {
+          this.closeEverything();
+          const { collected, next } = this.consumeBlock(lines, i, Txt2TagsRegexes.blockCommentClose);
+          this.blocks.push(Comment(collected));
+          i = next; continue;
+        }
+        if (Txt2TagsRegexes.blockVerbOpen.test(line)) {
+          this.closeEverything();
+          const { collected, next } = this.consumeBlock(lines, i, Txt2TagsRegexes.blockVerbClose);
+          this.blocks.push(CodeBlock(collected, 'verbatim'));
+          i = next; continue;
+        }
+        if (Txt2TagsRegexes.blockRawOpen.test(line)) {
+          this.closeEverything();
+          const { collected, next } = this.consumeBlock(lines, i, Txt2TagsRegexes.blockRawClose);
+          this.blocks.push(CodeBlock(collected, 'raw'));
+          i = next; continue;
+        }
+        if (Txt2TagsRegexes.blockTaggedOpen.test(line)) {
+          this.closeEverything();
+          const { collected, next } = this.consumeBlock(lines, i, Txt2TagsRegexes.blockTaggedClose);
+          this.blocks.push(CodeBlock(collected, 'tagged'));
+          i = next; continue;
+        }
+
+        const oneLineVerb = Txt2TagsRegexes.oneLineVerb.exec(line);
+        if (oneLineVerb) {
+          this.closeEverything();
+          this.blocks.push(CodeBlock([line.slice(oneLineVerb.index + oneLineVerb[0].length)], 'verbatim'));
+          i++; continue;
+        }
+        const oneLineRaw = Txt2TagsRegexes.oneLineRaw.exec(line);
+        if (oneLineRaw) {
+          this.closeEverything();
+          this.blocks.push(CodeBlock([line.slice(oneLineRaw.index + oneLineRaw[0].length)], 'raw'));
+          i++; continue;
+        }
+        const oneLineTagged = Txt2TagsRegexes.oneLineTagged.exec(line);
+        if (oneLineTagged) {
+          this.closeEverything();
+          this.blocks.push(CodeBlock([line.slice(oneLineTagged.index + oneLineTagged[0].length)], 'tagged'));
+          i++; continue;
+        }
+
+        if (Txt2TagsRegexes.blankLine.test(line)) {
+          this.closeEverything();
+          i++; continue;
+        }
+
+        if (line.startsWith('%')) {
+          this.flushParagraph();
+          this.closeAllLists();
+          this.closeTable();
+          this.commentLines.push(line);
+          i++; continue;
+        }
+
+        const bar = Txt2TagsRegexes.bar.exec(line);
+        if (bar) {
+          this.closeEverything();
+          this.blocks.push(HorizontalRule(bar[2][0]));
+          i++; continue;
+        }
+
+        const heading = this.matchHeading(line);
+        if (heading) {
+          this.closeEverything();
+          this.blocks.push(heading);
+          i++; continue;
+        }
+
+        if (this.handleListLine(line)) {
+          this.flushParagraph();
+          this.closeTable();
+          this.flushComment();
+          i++; continue;
+        }
+
+        if (Txt2TagsRegexes.table.test(line)) {
+          this.flushParagraph();
+          this.closeAllLists();
+          this.flushComment();
+          if (!this.tableRows) this.tableRows = [];
+          this.tableRows.push(this.parseTableRow(line));
+          i++; continue;
+        }
+
+        // Paragraphe (bloc par défaut) : referme listes/tableau/commentaires en
+        // cours, mais PAS le paragraphe déjà ouvert (continuation).
+        this.closeAllLists();
+        this.closeTable();
+        this.flushComment();
+        this.paragraphLines.push(line);
+        i++;
+      }
+      this.closeEverything();
+      return this.blocks;
+    }
+
+    closeEverything() {
+      this.flushParagraph();
+      this.closeAllLists();
+      this.closeTable();
+      this.flushComment();
+    }
+
+    flushParagraph() {
+      if (!this.paragraphLines.length) return;
+      const text = this.paragraphLines.join(' ');
+      this.paragraphLines = [];
+      this.blocks.push(Paragraph(Txt2TagsInline.parse(text)));
+    }
+
+    flushComment() {
+      if (!this.commentLines.length) return;
+      const lines = this.commentLines;
+      this.commentLines = [];
+      this.blocks.push(Comment(lines));
+    }
+
+    closeTable() {
+      const rows = this.tableRows;
+      if (!rows) return;
+      this.tableRows = null;
+      if (rows.length) this.blocks.push(Table(rows));
+    }
+
+    closeAllLists() {
+      while (this.listStack.length) this.popListFrame();
+    }
+
+    popListFrame() {
+      const frame = this.listStack.pop();
+      const block = frame.isDef
+        ? DefinitionList(frame.items.map(it => DefinitionItem(it.inlines, [])))
+        : ListNode(frame.ordered, frame.items.map(it => ListItem(it.inlines, it.children)));
+      const parent = this.listStack[this.listStack.length - 1];
+      const parentItem = parent && parent.items[parent.items.length - 1];
+      if (parentItem) {
+        parentItem.children.push(block);
+      } else {
+        this.blocks.push(block);
+      }
+    }
+
+    markerMatches(frame, marker) {
+      switch (marker) {
+        case '-': return !frame.isDef && !frame.ordered;
+        case '+': return !frame.isDef && frame.ordered;
+        case ':': return frame.isDef;
+        default: return false;
+      }
+    }
+
+    handleListLine(line) {
+      const closeMatch = Txt2TagsRegexes.listClose.exec(line);
+      if (closeMatch && this.listStack.length) {
+        const indent = closeMatch[1].length;
+        const marker = closeMatch[2][0];
+        const top = this.listStack[this.listStack.length - 1];
+        if (top.indent === indent && this.markerMatches(top, marker)) {
+          this.popListFrame();
+          return true;
+        }
+      }
+
+      const listMatch = Txt2TagsRegexes.list.exec(line);
+      const numMatch = !listMatch ? Txt2TagsRegexes.numlist.exec(line) : null;
+      const defMatch = (!listMatch && !numMatch) ? Txt2TagsRegexes.deflist.exec(line) : null;
+      const match = listMatch || numMatch || defMatch;
+      if (!match) return false;
+
+      const indent = match[1].length;
+      const isDef = !!defMatch;
+      const ordered = !!numMatch;
+      const content = isDef ? match[3] : line.slice(match.index + match[0].length);
+
+      while (this.listStack.length && this.listStack[this.listStack.length - 1].indent > indent) {
+        this.popListFrame();
+      }
+      const top = this.listStack[this.listStack.length - 1];
+      if (top && top.indent === indent && (top.isDef !== isDef || top.ordered !== ordered)) {
+        this.popListFrame();
+      }
+      if (!this.listStack.length || this.listStack[this.listStack.length - 1].indent < indent) {
+        this.listStack.push(new OpenList(indent, ordered, isDef));
+      }
+
+      this.listStack[this.listStack.length - 1].items.push(new ItemBuilder(Txt2TagsInline.parse(content.trim())));
+      return true;
+    }
+
+    matchHeading(line) {
+      let m = Txt2TagsRegexes.title.exec(line);
+      if (m) return Heading(m[1].length, Txt2TagsInline.parse(m[2].trim()), m[3] || null, true);
+      m = Txt2TagsRegexes.numtitle.exec(line);
+      if (m) return Heading(m[1].length, Txt2TagsInline.parse(m[2].trim()), m[3] || null, false);
+      m = Txt2TagsRegexes.markdownHeading.exec(line);
+      if (m) return Heading(m[1].length, Txt2TagsInline.parse(m[2].trim()), null, true);
+      return null;
+    }
+
+    /** Table simplifiée : cellules séparées par " | ", "||" en tête = ligne d'en-tête. */
+    parseTableRow(rawLine) {
+      let line = rawLine.replace(/^ +/, '').replace(/^\|/, '');
+      const isHeader = line.startsWith('|');
+      if (isHeader) line = line.slice(1);
+      if (line.startsWith(' ')) line = line.slice(1);
+      line = line.trim();
+      if (line.endsWith('|')) line = line.slice(0, -1).trim();
+      const cellTexts = line === '' ? [] : line.split(' | ');
+      const cells = cellTexts.map(t => TableCell(Txt2TagsInline.parse(t.trim())));
+      return TableRow(cells, isHeader);
+    }
+
+    consumeBlock(lines, start, closeRegex) {
+      const collected = [];
+      let i = start + 1;
+      while (i < lines.length && !closeRegex.test(lines[i])) {
+        collected.push(lines[i]);
+        i++;
+      }
+      const next = i < lines.length ? i + 1 : i;
+      return { collected, next };
+    }
+  }
+
+  return { parse };
+})();
+
+
+'use strict';
+// AST -> HTML rendering for the real preview (phase 3) — zettelium-android
+// doesn't need this (it renders the AST natively in Compose instead), so
+// this module has no Kotlin counterpart to port from.
+//
+// Deviation from txt2tags semantics, deliberate: original txt2tags treats
+// """raw""" / '''tagged''' text (block and inline) as verbatim passthrough
+// into the *target's native syntax* — for an HTML target that would mean
+// literal, unescaped HTML. Here the "target" is this app's own live DOM, so
+// treating repository-file content as trusted-to-inject-unescaped would be
+// a self-XSS risk (a note file is still untrusted input, e.g. shared/synced
+// from elsewhere). All three code-block kinds and raw/tagged inlines are
+// therefore rendered as escaped text, not injected verbatim.
+const Txt2TagsRender = (() => {
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function renderInlines(inlines, opts) {
+    return inlines.map(i => renderInline(i, opts)).join('');
+  }
+
+  // `opts.resolveZkLink(zkId)` (phase 5, optional) resolves a ZkLink to an
+  // index entry `{path, ...}` — when it returns one, the link renders as a
+  // clickable `<a data-zk-path>` (wired up by editor.js); otherwise (index
+  // not built yet, or target genuinely missing) it stays a plain, inert span.
+  function renderInline(inline, opts = {}) {
+    switch (inline.type) {
+      case 'Text': return escapeHtml(inline.text);
+      case 'Bold': return `<b>${renderInlines(inline.children, opts)}</b>`;
+      case 'Italic': return `<i>${renderInlines(inline.children, opts)}</i>`;
+      case 'Underline': return `<u>${renderInlines(inline.children, opts)}</u>`;
+      case 'Strike': return `<s>${renderInlines(inline.children, opts)}</s>`;
+      case 'Mono': return `<code>${escapeHtml(inline.text)}</code>`;
+      case 'RawInline': return escapeHtml(inline.text);
+      case 'TaggedInline': return escapeHtml(inline.text);
+      case 'Link':
+        return `<a href="${escapeHtml(inline.target)}" target="_blank" rel="noopener">${renderInlines(inline.label, opts)}</a>`;
+      case 'ZkLink': {
+        const resolved = opts.resolveZkLink ? opts.resolveZkLink(inline.zkId) : null;
+        if (resolved) {
+          return `<a href="#" class="zk-link" data-zk-path="${escapeHtml(resolved.path)}" title="zkId: ${escapeHtml(inline.zkId)}">${escapeHtml(inline.target)}</a>`;
+        }
+        return `<span class="zk-link" title="zkId: ${escapeHtml(inline.zkId)}">${escapeHtml(inline.target)}</span>`;
+      }
+      case 'Image':
+        // Résolution réelle via FSA = raffinement ultérieur (même
+        // séquencement que zettelium-android, où le rendu d'image n'est
+        // arrivé qu'au round 17, bien après la phase 3). Espace réservé textuel pour l'instant.
+        return `<span class="t2t-image-placeholder">[image : ${escapeHtml(inline.path)}]</span>`;
+      default:
+        return '';
+    }
+  }
+
+  function renderBlock(block, opts) {
+    switch (block.type) {
+      case 'Heading': {
+        const level = Math.min(block.level, 6);
+        return `<h${level}>${renderInlines(block.inlines, opts)}</h${level}>`;
+      }
+      case 'Paragraph':
+        return `<p>${renderInlines(block.inlines, opts)}</p>`;
+      case 'Comment':
+        return ''; // jamais rendu
+      case 'HorizontalRule':
+        return '<hr>';
+      case 'CodeBlock':
+        return `<pre class="t2t-code">${escapeHtml(block.lines.join('\n'))}</pre>`;
+      case 'ListNode': {
+        const tag = block.ordered ? 'ol' : 'ul';
+        return `<${tag}>${block.items.map(it => renderListItem(it, opts)).join('')}</${tag}>`;
+      }
+      case 'DefinitionList':
+        return `<dl>${block.items.map(it =>
+          `<dt>${renderInlines(it.term, opts)}</dt><dd>${renderInlines(it.description, opts)}</dd>`).join('')}</dl>`;
+      case 'Table':
+        return renderTable(block, opts);
+      default:
+        return '';
+    }
+  }
+
+  function renderListItem(item, opts) {
+    const childHtml = item.children.map(b => renderBlock(b, opts)).join('');
+    return `<li>${renderInlines(item.inlines, opts)}${childHtml}</li>`;
+  }
+
+  function renderTable(table, opts) {
+    const rows = table.rows.map(row => {
+      const cellTag = row.isHeader ? 'th' : 'td';
+      const cells = row.cells.map(c => `<${cellTag}>${renderInlines(c.inlines, opts)}</${cellTag}>`).join('');
+      return `<tr>${cells}</tr>`;
+    }).join('');
+    return `<table>${rows}</table>`;
+  }
+
+  function renderAstToHtml(blocks, opts = {}) {
+    return blocks.map(b => renderBlock(b, opts)).join('\n');
+  }
+
+  return { renderAstToHtml, escapeHtml };
+})();
+
+
+'use strict';
+// Ported from zettelium-android's `parser/Txt2TagsSummary.kt`. Aplatit une
+// liste d'Inline en texte brut, et dérive le titre indexé d'une note (phase
+// 4 — utilisé par index.js) : premier titre trouvé, sinon premier
+// paragraphe non vide, sinon un repli (typiquement le nom de fichier).
+const Txt2TagsSummary = (() => {
+  function plainText(inlines) {
+    let out = '';
+    for (const inline of inlines) {
+      switch (inline.type) {
+        case 'Text':
+        case 'Mono':
+        case 'RawInline':
+        case 'TaggedInline':
+          out += inline.text;
+          break;
+        case 'Bold':
+        case 'Italic':
+        case 'Underline':
+        case 'Strike':
+          out += plainText(inline.children);
+          break;
+        case 'Link':
+          out += plainText(inline.label);
+          break;
+        case 'ZkLink':
+          out += inline.target;
+          break;
+        case 'Image':
+          out += inline.path;
+          break;
+      }
+    }
+    return out;
+  }
+
+  function extractTitle(blocks, fallback) {
+    for (const b of blocks) {
+      if (b.type !== 'Heading') continue;
+      const t = plainText(b.inlines).trim();
+      if (t) return t;
+    }
+    for (const b of blocks) {
+      if (b.type !== 'Paragraph') continue;
+      const t = plainText(b.inlines).trim();
+      if (t) return t;
+    }
+    return fallback;
+  }
+
+  return { plainText, extractTitle };
+})();
+
+
+'use strict';
+// Table des matières d'un document txt2tags — ported from zettelium-android's
+// `parser/Txt2TagsToc.kt`. Reprend exactement la même détection de titre que
+// `Txt2TagsParser.matchHeading` (même banque `Txt2TagsRegexes`, même ordre
+// de précédence title/numtitle/markdownHeading), pour garantir que les
+// entrées correspondent 1 pour 1 et dans le même ordre aux blocs `Heading`
+// produits par le parseur — l'éditeur s'appuie sur cette correspondance
+// pour faire défiler l'aperçu jusqu'au bon bloc (voir editor.js).
+//
+// Volontairement **pas** un champ de position ajouté sur `Heading` lui-même :
+// nos tests (`test/cases.js`) comparent les `Heading` par égalité profonde,
+// y ajouter un offset casserait ces comparaisons pour un gain marginal — un
+// scan séparé et léger suffit (même raisonnement que le Kotlin d'origine).
+const Txt2TagsToc = (() => {
+  // Pas de filtre sur un titre vide : `Txt2TagsParser.matchHeading` n'en
+  // applique aucun et produit toujours un bloc `Heading`, même vide — la
+  // correspondance 1 pour 1 avec les entrées de TOC exige le même critère
+  // des deux côtés (piège déjà rencontré et corrigé côté Android, round 16).
+  function matchHeadingEntry(line, offset) {
+    let m = Txt2TagsRegexes.title.exec(line);
+    if (m) return { level: m[1].length, title: m[2].trim(), charOffset: offset };
+    m = Txt2TagsRegexes.numtitle.exec(line);
+    if (m) return { level: m[1].length, title: m[2].trim(), charOffset: offset };
+    m = Txt2TagsRegexes.markdownHeading.exec(line);
+    if (m) return { level: m[1].length, title: m[2].trim(), charOffset: offset };
+    return null;
+  }
+
+  function build(source) {
+    const entries = [];
+    let offset = 0;
+    for (const line of source.split('\n')) {
+      const entry = matchHeadingEntry(line, offset);
+      if (entry) entries.push(entry);
+      offset += line.length + 1;
+    }
+    return entries;
+  }
+
+  return { build };
+})();
+
+
+'use strict';
+// Fonctions Zettelkasten — ported 1:1 from zettelium-android's
+// `parser/ZettelkastenLinks.kt` (ID generation/detection, `[[cible|zkId]]`
+// link syntax, link repair transform). Model from QOwnNotes'
+// `zettelkasten.qml` (see PLAN.md section 5). Pure module, no dependency on
+// State/DOM — same "stays testable in isolation" property as the Kotlin
+// original.
+const ZettelkastenLinks = (() => {
+  // Format d'ID par défaut : horodatage à 14 chiffres, ex. `20260702143012`.
+  const DEFAULT_ID_REGEX = /\d{14}/;
+  // Format de génération par défaut — correspond exactement à DEFAULT_ID_REGEX.
+  const DEFAULT_ID_FORMAT = '%Y%M%D%h%m%s';
+  // Utilisées seulement si l'appelant n'en fournit pas explicitement — voir
+  // `noteExtensionsList()` dans state.js, la source de vérité réelle une
+  // fois l'app démarrée.
+  const DEFAULT_NOTE_EXTENSIONS = ['.txt', '.t2t', '.md'];
+
+  const LINK_REGEX_G = /\[\[([^\]|]*)\|([^\]]*)\]\]/g;
+
+  function escapeRegExp(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function pad2(n) { return String(n).padStart(2, '0'); }
+
+  /**
+   * Génère un ID Zettelkasten à partir d'un `format` à tokens (`%Y` année sur
+   * 4 chiffres, `%M`/`%D`/`%h`/`%m`/`%s` mois/jour/heure/minute/seconde sur 2
+   * chiffres, tout le reste recopié tel quel). Distinct du motif de
+   * *détection* (`idPattern`, une regex arbitraire non inversible en
+   * général) — voir le piège documenté côté Android (rounds 12/12bis/12ter,
+   * un motif personnalisé ne reconnaissait jamais l'ID de sa propre note
+   * tant que génération et détection restaient désynchronisées).
+   */
+  function generateId(now = new Date(), format = DEFAULT_ID_FORMAT) {
+    return format
+      .replace('%Y', String(now.getFullYear()))
+      .replace('%M', pad2(now.getMonth() + 1))
+      .replace('%D', pad2(now.getDate()))
+      .replace('%h', pad2(now.getHours()))
+      .replace('%m', pad2(now.getMinutes()))
+      .replace('%s', pad2(now.getSeconds()));
+  }
+
+  /** Retire tous les liens `[[cible|id]]` du texte — passe préalable avant de chercher l'ID propre d'une note. */
+  function stripLinks(content) {
+    return content.replace(LINK_REGEX_G, '');
+  }
+
+  /**
+   * Détecte l'ID Zettelkasten d'une note : d'abord dans le nom de fichier,
+   * sinon dans le corps du texte, **après avoir retiré les liens
+   * `[[cible|id]]` existants** — sinon un ID *référencé* serait confondu
+   * avec l'ID *propre* de la note (piège documenté dans `zettelkasten.qml`).
+   */
+  function extractId(fileName, content, idRegex = DEFAULT_ID_REGEX) {
+    let m = idRegex.exec(fileName);
+    if (m) return m[0];
+    m = idRegex.exec(stripLinks(content));
+    return m ? m[0] : null;
+  }
+
+  /** Trouve tous les liens `[[cible|id]]` d'un texte, dans l'ordre d'apparition. `start`/`end` = offsets (end exclusif). */
+  function findLinks(content) {
+    return [...content.matchAll(LINK_REGEX_G)].map(m => ({
+      rawTarget: m[0],
+      target: m[1],
+      zkId: m[2],
+      start: m.index,
+      end: m.index + m[0].length,
+    }));
+  }
+
+  /**
+   * Lien `[[cible|id]]` chevauchant la sélection ou la position de curseur
+   * donnée, s'il existe — pour "suivre le lien" depuis l'éditeur. Un
+   * curseur posé juste avant `[[` ou juste après `]]` compte comme "dans"
+   * le lien (chevauchement inclusif, volontairement généreux).
+   */
+  function linkAt(content, selStart, selEnd) {
+    if (selStart < 0 || selEnd < 0) return null;
+    const from = Math.min(selStart, selEnd);
+    const to = Math.max(selStart, selEnd);
+    return findLinks(content).find(link => from <= link.end && to >= link.start) || null;
+  }
+
+  function formatLink(target, zkId) {
+    return `[[${target}|${zkId}]]`;
+  }
+
+  /** `fileName` sans son extension de note reconnue (`extensions`), ou tel quel si elle n'y figure pas. */
+  function stripNoteExtension(fileName, extensions = DEFAULT_NOTE_EXTENSIONS) {
+    const lower = fileName.toLowerCase();
+    const ext = extensions.find(e => lower.endsWith(e.toLowerCase()));
+    return ext ? fileName.slice(0, fileName.length - ext.length) : fileName;
+  }
+
+  /** Cible à utiliser dans un lien `[[cible|zkId]]` pour `fileName`, selon la préférence d'extension du dépôt. */
+  function linkTarget(fileName, includeExtension, extensions = DEFAULT_NOTE_EXTENSIONS) {
+    return includeExtension ? fileName : stripNoteExtension(fileName, extensions);
+  }
+
+  /**
+   * Réécrit dans `content` tout lien `[[ancienneCible|zkId]]` vers
+   * `[[currentTarget|zkId]]` — ne touche que les liens ciblant `zkId`, et
+   * laisse inchangés ceux qui pointent déjà vers `currentTarget`.
+   */
+  function repairLinks(content, zkId, currentTarget) {
+    const pattern = new RegExp(String.raw`\[\[([^\]|]*)\|${escapeRegExp(zkId)}\]\]`, 'g');
+    return content.replace(pattern, (match, oldTarget) =>
+      oldTarget === currentTarget ? match : formatLink(currentTarget, zkId));
+  }
+
+  /** Compile `pattern`, ou retombe silencieusement sur le motif par défaut s'il n'est pas une regex valide. */
+  function compileIdRegex(pattern) {
+    if (!pattern) return DEFAULT_ID_REGEX;
+    try {
+      return new RegExp(pattern);
+    } catch (_) {
+      return DEFAULT_ID_REGEX;
+    }
+  }
+
+  return {
+    DEFAULT_ID_REGEX, DEFAULT_ID_FORMAT, DEFAULT_NOTE_EXTENSIONS,
+    generateId, stripLinks, extractId, findLinks, linkAt, formatLink,
+    stripNoteExtension, linkTarget, repairLinks, compileIdRegex,
+  };
+})();
+
+
+'use strict';
+// Extraction des `#tag` inline pour l'indexation (PLAN.md section 2,
+// "Tags") — ported from zettelium-android's `data/storage/TagExtractor.kt`.
+// Pas une syntaxe txt2tags — convention propre à Zettelium, appliquée sur
+// le texte brut, pas sur l'AST du parseur.
+//
+// `#` ne doit être ni précédé d'un caractère de mot ni d'un autre `#`
+// (exclut les ancres d'URL `page#section` et les marqueurs de titre
+// markdown `## Titre`, qui ont un espace après le `#` de toute façon et ne
+// matcheraient pas la classe de caractères juste après).
+//
+// `\p{L}` (Unicode property escape) exige le flag `u`, disponible sans
+// polyfill dans Node 10+/tout navigateur evergreen — équivalent direct du
+// Kotlin `\p{L}` (déjà Unicode-aware par défaut).
+const TagExtractor = (() => {
+  const TAG_REGEX = /(?<![\w#])#([\p{L}0-9_-]+)/gu;
+
+  function extract(content) {
+    const tags = new Set();
+    for (const m of content.matchAll(TAG_REGEX)) tags.add(m[1]);
+    return tags;
+  }
+
+  return { extract };
+})();
+
+
+'use strict';
+// Minimal INI parser/writer for zettelium's durable config file
+// (`zettelium.ini`, written to the primary repository — see state.js
+// `scheduleDurableExport()`/`writeDurableConfig()`).
+//
+// NOT a port of writhdeck-web's `ini.js`: that file's parse/write logic is
+// tightly coupled to writhdeck's own settings (schemes, profiles, timer,
+// margins...), none of which apply to zettelium — reusing it verbatim would
+// import a pile of dead, confusing mappings for settings this app doesn't
+// have. Kept the same *format* (`[section]` + `key = value`, `%`/`#`
+// comments) for stylistic consistency with the writerdeck family and so the
+// file stays human-readable/editable, but the content is new.
+const INI = (() => {
+  const KEY_MAP = {
+    note_extensions:                 ['noteExtensions', 'str'],
+    note_extensions_filter_disabled: ['noteExtensionsFilterDisabled', 'bool'],
+    note_sort_order:                 ['noteSortOrder', 'str'],
+    id_pattern:                      ['idPattern', 'str'],
+    id_generation_format:            ['idGenerationFormat', 'str'],
+    scheme:                          ['scheme', 'str'],
+    dark_mode:                       ['darkMode', 'bool'],
+  };
+  const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, [jsKey]]) => [jsKey, k]));
+
+  function parseBool(v) {
+    return /^(yes|1|true|on)$/i.test(String(v).trim());
+  }
+
+  // Strips inline comments (# preceded by whitespace); leading whitespace
+  // trimmed, trailing preserved (same convention as writhdeck-web's ini.js,
+  // in case a value ever needs a meaningful trailing space).
+  function stripComment(v) {
+    return v.replace(/\s+#.*$/, '').replace(/^\s+/, '');
+  }
+
+  function parse(text) {
+    const settings = {};
+    let knownRepositories = [];
+    let section = '';
+    for (const rawLine of text.split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#') || line.startsWith('%')) continue;
+
+      const secMatch = line.match(/^\[([^[\]]+)\]$/);
+      if (secMatch) { section = secMatch[1].trim(); continue; }
+
+      const kvMatch = line.match(/^(\w+)\s*=(.*)$/);
+      if (!kvMatch) continue;
+      const key = kvMatch[1].trim();
+      const val = stripComment(kvMatch[2]);
+
+      if (section === 'repositories' && key === 'known') {
+        knownRepositories = val.split('|').map(s => s.trim()).filter(Boolean);
+        continue;
+      }
+      if (section !== 'general') continue;
+      const mapping = KEY_MAP[key];
+      if (!mapping) continue;
+      const [jsKey, type] = mapping;
+      settings[jsKey] = type === 'bool' ? parseBool(val) : val;
+    }
+    return { settings, knownRepositories };
+  }
+
+  // `repositoryNames` is purely informational (see state.js
+  // maybeRestoreDurableConfig — repositories themselves are never
+  // auto-recreated from this list, only shown to the user as a reminder of
+  // what to re-add via the folder picker).
+  function stringify(settings, repositoryNames) {
+    const lines = ['[general]'];
+    for (const [jsKey, iniKey] of Object.entries(REVERSE_MAP)) {
+      const value = settings[jsKey];
+      if (value === undefined) continue;
+      lines.push(`${iniKey} = ${typeof value === 'boolean' ? (value ? 'yes' : 'no') : value}`);
+    }
+    lines.push('', '[repositories]', `known = ${repositoryNames.join(' | ')}`);
+    return lines.join('\n') + '\n';
+  }
+
+  return { parse, stringify };
+})();
+
+
+'use strict';
+// In-memory application state (phase 1 scope — see PLAN.md section 8).
+const State = {
+  // Repositories registry, loaded from Storage at startup.
+  repositories: [],        // [{id, name, dirHandle, order, colorTag, permission}]
+  activeRepositoryId: null,
+
+  // Active repository's *currently browsed folder* — root when dirStack has
+  // one entry, a subfolder when deeper (phase 6 subfolder navigation,
+  // generalizing writhdeck-web's dirStack/scanDir pattern to "whichever
+  // repository is active" instead of a single optional watched folder).
+  dirStack: [],            // [{name, handle, path}] root..current (path: '' at root, else 'sub/sub2/')
+  dirSubdirs: [],          // [{name, handle, path}] subfolders of the current folder
+  repoFiles: [],           // NoteFile[] of the current folder — {path, name, fileHandle, lastModified, size}
+
+  settings: {
+    // Comma/space-separated suffixes, same convention and default as
+    // zettelium-android's AppSettings.noteExtensions (round 21).
+    noteExtensions: 'txt, t2t, md',
+    noteExtensionsFilterDisabled: false,
+
+    // Zettelkasten (phase 5) — detection pattern (regex) vs. generation
+    // format (token string) are deliberately distinct settings, same
+    // reasoning as AppSettings.idPattern/idGenerationFormat: a regex isn't
+    // reversible into a generator in general (see zettelkasten.js).
+    idPattern: ZettelkastenLinks.DEFAULT_ID_REGEX.source,
+    idGenerationFormat: ZettelkastenLinks.DEFAULT_ID_FORMAT,
+
+    // Sort order for the file browser — 'name' | 'modified', same choice
+    // and persistence as AppSettings.noteSortOrder (Android round 3).
+    noteSortOrder: 'name',
+
+    // Theme (phase 6) — scheme name from schemes.js (SCHEMES/customSchemes)
+    // + dark/light, applied via applyTheme() in app.js.
+    scheme: 'default',
+    darkMode: true
+  }
+};
+
+// Fichier de config durable (phase 6) — écrit dans le dépôt *primaire*
+// (le premier par ordre d'affichage), pour survivre à une purge des
+// données du navigateur qui viderait IndexedDB : les permissions File
+// System Access sont de toute façon TOUJOURS révoquées dans ce cas
+// (contrainte de la plateforme, non contournable, même limite qu'Android)
+// — mais le fichier lui-même reste sur le disque réel de l'utilisateur, et
+// peut donc être retrouvé et proposé en restauration dès que ce même
+// dossier est ré-ajouté comme dépôt (voir maybeRestoreDurableConfig, appelé
+// depuis repositories.js). Ne recrée jamais de dépôt automatiquement à
+// partir de la liste "known" qu'il contient : un nom retrouvé sans
+// permission FSA valide serait inutilisable, c'est purement informatif.
+const DURABLE_CONFIG_FILENAME = 'zettelium.ini';
+let _durableExportTimer = null;
+
+function primaryRepository() {
+  return State.repositories.length ? State.repositories[0] : null; // déjà trié par `order`
+}
+
+// Débounce 500 ms : plusieurs réglages peuvent changer coup sur coup (ex.
+// frappe dans un champ Réglages) — même raisonnement qu'Android
+// (AppSettings.scheduleDurableExport), qui a dû corriger un bug réel de
+// fichiers dupliqués (`zettelium (1).ini`, etc.) causé par plusieurs
+// écritures concurrentes sans debounce ni verrou.
+function scheduleDurableExport() {
+  if (_durableExportTimer) clearTimeout(_durableExportTimer);
+  _durableExportTimer = setTimeout(writeDurableConfig, 500);
+}
+
+async function writeDurableConfig() {
+  const repo = primaryRepository();
+  if (!repo) return;
+  const text = INI.stringify(State.settings, State.repositories.map(r => r.name));
+  try {
+    const handle = await repo.dirHandle.getFileHandle(DURABLE_CONFIG_FILENAME, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(text);
+    await writable.close();
+  } catch (e) {
+    console.error('Échec de l\'écriture de la config durable', e);
+  }
+}
+
+// Appelé après l'ajout d'un nouveau dépôt (repositories.js) : si ce dossier
+// contient déjà un `zettelium.ini` (typiquement une reconnexion après une
+// purge des données du navigateur), propose de restaurer les réglages.
+async function maybeRestoreDurableConfig(repo) {
+  let handle;
+  try {
+    handle = await repo.dirHandle.getFileHandle(DURABLE_CONFIG_FILENAME);
+  } catch (_) {
+    return; // pas de fichier de config ici, rien à faire
+  }
+  let text;
+  try {
+    text = await (await handle.getFile()).text();
+  } catch (e) {
+    console.error('Échec de lecture de la config durable', e);
+    return;
+  }
+  const { settings, knownRepositories } = INI.parse(text);
+  if (!Object.keys(settings).length) return;
+
+  const knownHint = knownRepositories.length
+    ? `\n\nDépôts connus (à ré-ajouter manuellement, un par un, via « + Dépôt ») : ${knownRepositories.join(', ')}`
+    : '';
+  const restore = confirm(
+    `Un fichier de configuration Zettelium a été trouvé dans ce dossier.\n` +
+    `Restaurer les réglages ?${knownHint}`);
+  if (!restore) return;
+
+  Object.assign(State.settings, settings);
+  await Promise.all([
+    setNoteExtensions(State.settings.noteExtensions),
+    setNoteExtensionsFilterDisabled(State.settings.noteExtensionsFilterDisabled),
+    setNoteSortOrder(State.settings.noteSortOrder),
+    setIdPattern(State.settings.idPattern),
+    setIdGenerationFormat(State.settings.idGenerationFormat),
+    setScheme(State.settings.scheme),
+    setDarkMode(State.settings.darkMode)
+  ]);
+}
+
+function noteExtensionsList() {
+  const raw = State.settings.noteExtensions || '';
+  const list = raw.split(/[,\s]+/)
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean)
+    .map(ext => ext.startsWith('.') ? ext : '.' + ext);
+  // Never filter out every file silently if the user empties the field by
+  // mistake — same guard as the Android port.
+  return list.length ? list : ['.txt', '.t2t', '.md'];
+}
+
+function activeRepository() {
+  return State.repositories.find(r => r.id === State.activeRepositoryId) || null;
+}
+
+async function loadState() {
+  const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, darkMode] = await Promise.all([
+    Storage.getAllRepositories(),
+    Storage.getMeta('noteExtensions'),
+    Storage.getMeta('noteExtensionsFilterDisabled'),
+    Storage.getMeta('idPattern'),
+    Storage.getMeta('idGenerationFormat'),
+    Storage.getMeta('noteSortOrder'),
+    Storage.getMeta('scheme'),
+    Storage.getMeta('darkMode')
+  ]);
+  State.repositories = (repos || []).sort((a, b) => a.order - b.order);
+  if (noteExtensions !== undefined) State.settings.noteExtensions = noteExtensions;
+  if (filterDisabled !== undefined) State.settings.noteExtensionsFilterDisabled = filterDisabled;
+  // .trim() on load (not just on write) — a leading/trailing space in a
+  // mobile-style text field is invisible but makes the pattern silently
+  // match nothing (real bug already hit on Android, round 12ter).
+  if (idPattern !== undefined) State.settings.idPattern = idPattern.trim();
+  if (idGenerationFormat !== undefined) State.settings.idGenerationFormat = idGenerationFormat.trim();
+  if (noteSortOrder !== undefined) State.settings.noteSortOrder = noteSortOrder;
+  if (scheme !== undefined) State.settings.scheme = scheme;
+  if (darkMode !== undefined) State.settings.darkMode = darkMode;
+
+  // Re-verify permission on every repository without prompting — a prompt
+  // requires a user gesture, done on demand via reauthorizeRepository().
+  await Promise.all(State.repositories.map(async repo => {
+    repo.permission = await FSA.queryPermission(repo.dirHandle);
+  }));
+}
+
+async function addRepository(dirHandle) {
+  const repo = {
+    id: crypto.randomUUID(),
+    name: dirHandle.name,
+    dirHandle,
+    order: State.repositories.length,
+    colorTag: null,
+    includeExtensionInLinks: false, // Repository.includeExtensionInLinks (Android) — per-repo, see zettelkasten.js
+    permission: 'granted' // just picked, permission was just granted by the browser
+  };
+  State.repositories.push(repo);
+  await Storage.putRepository(repo);
+  scheduleDurableExport(); // the "known repositories" list changed
+  return repo;
+}
+
+async function setIncludeExtensionInLinks(repo, value) {
+  repo.includeExtensionInLinks = value;
+  await Storage.putRepository(repo);
+}
+
+async function removeRepository(id) {
+  State.repositories = State.repositories.filter(r => r.id !== id);
+  await Storage.deleteRepository(id);
+  if (State.activeRepositoryId === id) State.activeRepositoryId = null;
+  scheduleDurableExport(); // the "known repositories" list changed (and possibly the primary repo itself)
+}
+
+async function reauthorizeRepository(repo) {
+  repo.permission = await FSA.requestPermission(repo.dirHandle);
+  return repo.permission;
+}
+
+async function moveRepository(id, direction) {
+  const idx = State.repositories.findIndex(r => r.id === id);
+  const swapIdx = idx + direction;
+  if (idx < 0 || swapIdx < 0 || swapIdx >= State.repositories.length) return;
+  [State.repositories[idx], State.repositories[swapIdx]] =
+    [State.repositories[swapIdx], State.repositories[idx]];
+  State.repositories.forEach((r, i) => { r.order = i; });
+  await Promise.all(State.repositories.map(r => Storage.putRepository(r)));
+  scheduleDurableExport(); // reordering can change which repository is "primary" (order 0)
+}
+
+function resetDirStack() {
+  State.dirStack = [];
+  State.dirSubdirs = [];
+  State.repoFiles = [];
+}
+
+function currentDirHandle() {
+  return State.dirStack.length ? State.dirStack[State.dirStack.length - 1].handle : null;
+}
+
+function currentDirPath() {
+  return State.dirStack.length ? State.dirStack[State.dirStack.length - 1].path : '';
+}
+
+// Descends into a subfolder listed in `State.dirSubdirs` and rescans.
+async function dirEnter(subdir) {
+  State.dirStack.push(subdir);
+  await scanActiveRepo();
+}
+
+// Goes up one folder (no-op at the root, returns false) and rescans.
+async function dirUp() {
+  if (State.dirStack.length <= 1) return false;
+  State.dirStack.pop();
+  await scanActiveRepo();
+  return true;
+}
+
+async function scanActiveRepo() {
+  const repo = activeRepository();
+  if (!repo) { resetDirStack(); return; }
+  if (!State.dirStack.length) State.dirStack = [{ name: repo.name, handle: repo.dirHandle, path: '' }];
+  const { files, subdirs } = await FSA.listChildren(
+    currentDirHandle(), noteExtensionsList(), State.settings.noteExtensionsFilterDisabled, currentDirPath());
+  State.repoFiles = files;
+  State.dirSubdirs = subdirs;
+}
+
+async function setNoteExtensions(value) {
+  State.settings.noteExtensions = value;
+  await Storage.setMeta('noteExtensions', value);
+  scheduleDurableExport();
+}
+
+async function setNoteExtensionsFilterDisabled(value) {
+  State.settings.noteExtensionsFilterDisabled = value;
+  await Storage.setMeta('noteExtensionsFilterDisabled', value);
+  scheduleDurableExport();
+}
+
+// Changing the detection pattern invalidates every repository's index (a
+// note indexed under the old pattern may keep a stale/null zkId until its
+// file happens to change) — Index.indexRepository() compares against the
+// pattern it last indexed with and forces a full pass on mismatch, mirroring
+// AppSettings.needsIdPatternReindex/markIdPatternIndexed (Android rounds
+// 12/12bis). No explicit "force reindex" call needed here: it's a passive
+// comparison the indexer makes on its own next run.
+async function setIdPattern(value) {
+  State.settings.idPattern = value.trim();
+  await Storage.setMeta('idPattern', State.settings.idPattern);
+  scheduleDurableExport();
+}
+
+async function setIdGenerationFormat(value) {
+  State.settings.idGenerationFormat = value.trim();
+  await Storage.setMeta('idGenerationFormat', State.settings.idGenerationFormat);
+  scheduleDurableExport();
+}
+
+async function setNoteSortOrder(value) {
+  State.settings.noteSortOrder = value;
+  await Storage.setMeta('noteSortOrder', value);
+  scheduleDurableExport();
+}
+
+async function setScheme(value) {
+  State.settings.scheme = value;
+  await Storage.setMeta('scheme', value);
+  applyTheme(State.settings.scheme, State.settings.darkMode);
+  scheduleDurableExport();
+}
+
+async function setDarkMode(value) {
+  State.settings.darkMode = value;
+  await Storage.setMeta('darkMode', value);
+  applyTheme(State.settings.scheme, State.settings.darkMode);
+  scheduleDurableExport();
+}
+
+
+'use strict';
+// Syntax highlighting engine — textarea overlay technique, ported from
+// writhdeck-web/src/highlight.js. Driven by the shared Txt2TagsRegexes bank
+// (same regexes as the parser) rather than writhdeck-web's configurable
+// single-char markers — mirrors zettelium-android's SyntaxHighlighting.kt
+// model (heading level -> size class, comment dim, inline markup color).
+//
+// Deliberately NOT AST-based (same simplification Android documents for
+// itself): a lightweight per-line regex pass, not full parse+re-render on
+// every keystroke. No incremental single-line repaint optimization either
+// (writhdeck-web's editor.js has one, justified there by 90K-word
+// documents) — a full rehighlight() per keystroke is plenty for
+// zettelkasten-sized notes; can be added later if it proves necessary.
+const Highlight = (() => {
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // 'g'-flagged copies for iterating all matches on a line — kept separate
+  // from the parser's own flagless instances so shared `lastIndex` state
+  // never corrupts the parser's single-shot `.exec()` calls.
+  const MARKUP_REGEXES_G = [
+    Txt2TagsRegexes.fontBold,
+    Txt2TagsRegexes.fontItalic,
+    Txt2TagsRegexes.fontUnderline,
+    Txt2TagsRegexes.fontStrike,
+  ].map(re => new RegExp(re.source, 'g'));
+
+  // Heading level for a line — txt2tags `=`/`+` titles or markdown ATX, same
+  // precedence as Txt2TagsParser.matchHeading.
+  function headingLevel(line) {
+    let m = Txt2TagsRegexes.title.exec(line);
+    if (m) return m[1].length;
+    m = Txt2TagsRegexes.numtitle.exec(line);
+    if (m) return m[1].length;
+    m = Txt2TagsRegexes.markdownHeading.exec(line);
+    if (m) return m[1].length;
+    return null;
+  }
+
+  function renderLine(line) {
+    const esc = escapeHtml(line);
+    if (line.startsWith('%')) {
+      return `<span class="hl-comment">${esc}</span>`;
+    }
+    const level = headingLevel(line);
+    if (level !== null) {
+      const lvCls = level <= 4 ? ` hl-h${level}` : '';
+      return `<span class="hl-heading${lvCls}">${esc}</span>`;
+    }
+    let result = esc;
+    for (const rx of MARKUP_REGEXES_G) {
+      rx.lastIndex = 0;
+      result = result.replace(rx, m => `<span class="hl-markup">${escapeHtml(m)}</span>`);
+    }
+    return result;
+  }
+
+  // \n between spans = line break in the pre's pre-wrap IFC. Trailing \n
+  // ensures the overlay's height matches the textarea (empty last line).
+  function highlight(text) {
+    return text.split('\n')
+      .map(line => `<span class="hl-line">${renderLine(line)}</span>`)
+      .join('\n') + '\n';
+  }
+
+  return { highlight };
+})();
+
+
+'use strict';
+// In-memory search/Zettelkasten index — one entry per note, keyed by
+// repo-relative path. Ported in spirit from zettelium-android's
+// `data/storage/Indexer.kt`/`LinkRepair.kt`, adapted to the "in-memory, no
+// SQL/FTS" model decided in PLAN.md section 2: the index is a
+// **reconstructible projection**, never the source of truth — the repo's
+// files are. Recursive (covers subfolders) even though the browser UI
+// itself stays flat until phase 6 (see fsa.js).
+const Index = (() => {
+  const byRepo = new Map(); // repositoryId -> { entries: Map<path, entry>, lastIdPattern }
+
+  function ensure(repositoryId) {
+    if (!byRepo.has(repositoryId)) byRepo.set(repositoryId, { entries: new Map(), lastIdPattern: null });
+    return byRepo.get(repositoryId);
+  }
+
+  // Premier titre (Heading txt2tags/markdown) *détecté*, sans repli sur un
+  // paragraphe ni sur le nom de fichier — distinct de `title` (utilisé pour
+  // l'indexation/recherche par nom, qui a ce repli). Sert à l'affichage
+  // dans le sélecteur de lien / panneau de backlinks (demande explicite :
+  // "affiche le nom du fichier de la note, et ensuite seulement le premier
+  // titre détecté" — jamais une valeur de repli qui dupliquerait le nom).
+  function firstHeadingText(blocks) {
+    for (const b of blocks) {
+      if (b.type !== 'Heading') continue;
+      const t = Txt2TagsSummary.plainText(b.inlines).trim();
+      if (t) return t;
+    }
+    return null;
+  }
+
+  function buildEntry(file, content, indexedAt, idRegex) {
+    const blocks = Txt2TagsParser.parse(content);
+    const title = Txt2TagsSummary.extractTitle(blocks, file.name);
+    const heading = firstHeadingText(blocks);
+    const tags = TagExtractor.extract(content);
+    const zkId = ZettelkastenLinks.extractId(file.name, content, idRegex);
+    const links = ZettelkastenLinks.findLinks(content);
+    return {
+      path: file.path, name: file.name, fileHandle: file.fileHandle,
+      title, heading, tags, zkId, links, content,
+      lastModified: file.lastModified, lastIndexed: indexedAt,
+    };
+  }
+
+  /**
+   * Scan complet d'un dépôt : ne relit/reparse que les fichiers nouveaux ou
+   * modifiés depuis la dernière indexation (comparaison sur `lastModified`)
+   * — même raisonnement qu'Android (`Indexer.indexRepository`) : rouvrir un
+   * gros dépôt sans ce filtre reparse tout à chaque fois.
+   *
+   * `forceFull` contourne ce cache — nécessaire (et déclenché automatiquement
+   * ici, pas seulement sur demande explicite) quand `idPattern` a changé
+   * depuis la dernière passe complète *de ce dépôt* : sinon une note déjà
+   * indexée garderait un `zkId` figé, calculé avec l'ancien motif, tant que
+   * son fichier ne change pas (bug réel côté Android, rounds 12/12bis/12ter
+   * — motif personnalisé silencieusement "ignoré").
+   */
+  async function indexRepository(repo, { forceFull = false } = {}) {
+    const state = ensure(repo.id);
+    const idPatternChanged = state.lastIdPattern !== State.settings.idPattern;
+    const effectiveForceFull = forceFull || idPatternChanged;
+
+    let files;
+    try {
+      files = await FSA.listNoteFilesRecursive(
+        repo.dirHandle, noteExtensionsList(), State.settings.noteExtensionsFilterDisabled);
+    } catch (e) {
+      console.error(`Impossible de lister les fichiers du dépôt "${repo.name}"`, e);
+      return;
+    }
+
+    const idRegex = ZettelkastenLinks.compileIdRegex(State.settings.idPattern);
+    const now = Date.now();
+    const currentPaths = new Set(files.map(f => f.path));
+
+    for (const file of files) {
+      const existing = state.entries.get(file.path);
+      if (!effectiveForceFull && existing && existing.lastModified === file.lastModified) continue;
+      let content;
+      try {
+        content = await FSA.readFileText(file.fileHandle);
+      } catch (e) {
+        // Une note illisible ne doit jamais faire échouer l'indexation des
+        // autres — on l'ignore et on continue (même principe qu'Android).
+        console.error(`Échec d'indexation de "${file.path}"`, e);
+        continue;
+      }
+      state.entries.set(file.path, buildEntry(file, content, now, idRegex));
+    }
+
+    for (const path of [...state.entries.keys()]) {
+      if (!currentPaths.has(path)) state.entries.delete(path);
+    }
+
+    state.lastIdPattern = State.settings.idPattern;
+  }
+
+  /** Réindexation incrémentale d'une seule note (après une sauvegarde réussie), sans rescanner tout le dépôt. */
+  async function indexNote(repositoryId, file, content) {
+    const state = ensure(repositoryId);
+    const idRegex = ZettelkastenLinks.compileIdRegex(State.settings.idPattern);
+    let lastModified = file.lastModified;
+    try {
+      lastModified = (await file.fileHandle.getFile()).lastModified;
+    } catch (_) {
+      // conserve la valeur fournie par l'appelant
+    }
+    state.entries.set(file.path, buildEntry({ ...file, lastModified }, content, Date.now(), idRegex));
+  }
+
+  function entries(repositoryId) {
+    const state = byRepo.get(repositoryId);
+    return state ? [...state.entries.values()] : [];
+  }
+
+  function findByPath(repositoryId, path) {
+    const state = byRepo.get(repositoryId);
+    return state ? state.entries.get(path) : undefined;
+  }
+
+  function findByZkId(repositoryId, zkId) {
+    if (!zkId) return undefined;
+    return entries(repositoryId).find(e => e.zkId === zkId);
+  }
+
+  function backlinksFor(repositoryId, zkId, excludePath) {
+    return entries(repositoryId).filter(e => e.path !== excludePath && e.links.some(l => l.zkId === zkId));
+  }
+
+  async function repairEntry(repositoryId, entry, transform) {
+    const newContent = transform(entry.content);
+    if (newContent === entry.content) return false;
+    try {
+      const writable = await entry.fileHandle.createWritable();
+      await writable.write(newContent);
+      await writable.close();
+    } catch (e) {
+      console.error(`Échec de réparation de "${entry.path}"`, e);
+      return false;
+    }
+    await indexNote(repositoryId, entry, newContent);
+    return true;
+  }
+
+  /**
+   * Réécrit, dans les autres notes du dépôt, les liens `[[ancienNom|zkId]]`
+   * obsolètes pointant vers `zkId` — appelé à l'ouverture d'une note pour
+   * rattraper un renommage fait hors de l'app depuis la dernière fois
+   * (`excludePath` = la note qu'on est en train d'ouvrir, jamais réécrite
+   * elle-même). Suppose l'index déjà à jour (appeler après indexRepository).
+   */
+  async function repairBacklinksFor(repositoryId, zkId, currentTarget, excludePath) {
+    for (const entry of backlinksFor(repositoryId, zkId, excludePath)) {
+      await repairEntry(repositoryId, entry, content => ZettelkastenLinks.repairLinks(content, zkId, currentTarget));
+    }
+  }
+
+  /**
+   * Scan complet d'un dépôt : reconstruit la table zkId -> nom courant,
+   * réécrit tous les liens obsolètes. Retourne le nombre de notes
+   * modifiées. Un seul scan générique du contenu par note (pas une
+   * compilation de regex + un scan complet par zkId connu du dépôt, soit
+   * O(notes × zkId) au total) — ne tente de réparer que les zkId
+   * réellement référencés dans CETTE note (même optimisation qu'Android,
+   * round 16 : la version naïve était la cause probable des lenteurs déjà
+   * "corrigées" par un simple indicateur de chargement).
+   */
+  async function repairAllLinks(repositoryId, repo) {
+    const extensions = noteExtensionsList();
+    const includeExtension = !!(repo && repo.includeExtensionInLinks);
+    const all = entries(repositoryId);
+    const currentTargetByZkId = new Map();
+    for (const e of all) {
+      if (e.zkId) currentTargetByZkId.set(e.zkId, ZettelkastenLinks.linkTarget(e.name, includeExtension, extensions));
+    }
+    let repairedCount = 0;
+    for (const entry of all) {
+      const repaired = await repairEntry(repositoryId, entry, content => {
+        const referenced = new Set(ZettelkastenLinks.findLinks(content).map(l => l.zkId));
+        let newContent = content;
+        for (const zkId of referenced) {
+          const target = currentTargetByZkId.get(zkId);
+          if (target === undefined) continue;
+          newContent = ZettelkastenLinks.repairLinks(newContent, zkId, target);
+        }
+        return newContent;
+      });
+      if (repaired) repairedCount++;
+    }
+    return repairedCount;
+  }
+
+  return { indexRepository, indexNote, entries, findByPath, findByZkId, backlinksFor, repairBacklinksFor, repairAllLinks };
+})();
+
+
+'use strict';
+// Custom color scheme storage — ported in spirit from zettelium-android's
+// `AppSettings.customEditorSchemes` (create/edit/duplicate/delete, see
+// `EditorThemesScreen.kt`). Mutates `schemes.js`'s `customSchemes` object in
+// place (same shared top-level scope as `State`/`ZettelkastenLinks`/etc. —
+// no export plumbing needed, see any other module here), persisted as one
+// JSON blob in IndexedDB (`meta.customSchemes`).
+//
+// A custom scheme is edited with only the 6 colors zettelium-android also
+// exposes (fond/texte/sélection/titre/commentaire/balisage, dark + light) —
+// `bgBar`/`fgBar`/`bg2` (writhdeck-web's themed-toolbar fields, not part of
+// Android's model — zettelium has no separately themed chrome bar) are
+// derived from `bg`/`fg` rather than exposed for editing, so `applyTheme()`
+// still has every CSS variable it needs without a 12-field editor.
+const Themes = (() => {
+  function schemeFromSixColors(colors) {
+    const { bg, fg, bgSel, heading, comment, markup,
+      bgAlt, fgAlt, bgSelAlt, headingAlt, commentAlt, markupAlt } = colors;
+    return {
+      bg, fg, bgSel, heading, comment, markup,
+      bgBar: bg, fgBar: fg, bg2: bg,
+      bgAlt, fgAlt, bgSelAlt, headingAlt, commentAlt, markupAlt,
+      bgBarAlt: bgAlt, fgBarAlt: fgAlt, bg2Alt: bgAlt
+    };
+  }
+
+  // Les 6 couleurs éditables, dans l'ordre attendu par l'éditeur de thème
+  // (voir theme-editor.js) — même ordre qu'`EditorThemesScreen.kt`
+  // (`COLOR_LABEL_KEYS`/`darkList()`/`lightList()`).
+  function sixColorsFromScheme(scheme) {
+    return {
+      bg: scheme.bg, fg: scheme.fg, bgSel: scheme.bgSel,
+      heading: scheme.heading, comment: scheme.comment, markup: scheme.markup,
+      bgAlt: scheme.bgAlt, fgAlt: scheme.fgAlt, bgSelAlt: scheme.bgSelAlt,
+      headingAlt: scheme.headingAlt, commentAlt: scheme.commentAlt, markupAlt: scheme.markupAlt
+    };
+  }
+
+  async function persist() {
+    await Storage.setMeta('customSchemes', JSON.stringify(customSchemes));
+  }
+
+  async function loadCustomSchemes() {
+    const raw = await Storage.getMeta('customSchemes');
+    if (!raw) return;
+    try {
+      Object.assign(customSchemes, JSON.parse(raw));
+    } catch (e) {
+      console.error('Échec de lecture des thèmes personnalisés', e);
+    }
+  }
+
+  // `sixColors` = un objet {bg, fg, bgSel, heading, comment, markup,
+  // bgAlt, fgAlt, bgSelAlt, headingAlt, commentAlt, markupAlt}.
+  async function saveCustomScheme(name, sixColors) {
+    customSchemes[name] = schemeFromSixColors(sixColors);
+    await persist();
+    if (State.settings.scheme === name) applyTheme(State.settings.scheme, State.settings.darkMode);
+  }
+
+  async function deleteCustomScheme(name) {
+    delete customSchemes[name];
+    await persist();
+    if (State.settings.scheme === name) await setScheme('default');
+  }
+
+  return { loadCustomSchemes, saveCustomScheme, deleteCustomScheme, sixColorsFromScheme };
+})();
+
+
+'use strict';
+// Manual note backups — ported from zettelium-android's
+// `data/storage/BackupManager.kt` (+ `listBackupsFor`/`BackupRestoreSheet`).
+// A timestamped copy in `<repo>/backups/`, named `<base>_<timestamp><ext>` —
+// that directory is excluded from browsing/indexing (see fsa.js,
+// `FSA.BACKUPS_DIR_NAME`) so copies never show up as ordinary notes.
+const Backup = (() => {
+  function splitExt(fileName) {
+    const dot = fileName.lastIndexOf('.');
+    return dot > 0 ? [fileName.slice(0, dot), fileName.slice(dot)] : [fileName, ''];
+  }
+
+  // yyyy-MM-ddTHHhmmmss — same shape as Android's
+  // `SimpleDateFormat("yyyy-MM-dd'T'HH'h'mm'm'ss")`.
+  function timestamp(now = new Date()) {
+    const p = n => String(n).padStart(2, '0');
+    return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}` +
+      `T${p(now.getHours())}h${p(now.getMinutes())}m${p(now.getSeconds())}s`;
+  }
+
+  /** Crée une copie horodatée de `content` et retourne son nom, ou `null` en cas d'échec. */
+  async function create(repo, fileName, content) {
+    try {
+      const backupsDir = await repo.dirHandle.getDirectoryHandle(FSA.BACKUPS_DIR_NAME, { create: true });
+      const [base, ext] = splitExt(fileName);
+      const backupName = `${base}_${timestamp()}${ext}`;
+      const handle = await backupsDir.getFileHandle(backupName, { create: true });
+      const writable = await handle.createWritable();
+      await writable.write(content);
+      await writable.close();
+      return backupName;
+    } catch (e) {
+      console.error(`Échec de la sauvegarde de "${fileName}"`, e);
+      return null;
+    }
+  }
+
+  /** Sauvegardes existantes de `fileName` (préfixe `<base>_`), triées de la plus récente à la plus ancienne. */
+  async function list(repo, fileName) {
+    let backupsDir;
+    try {
+      backupsDir = await repo.dirHandle.getDirectoryHandle(FSA.BACKUPS_DIR_NAME);
+    } catch (_) {
+      return []; // pas encore de dossier de sauvegardes
+    }
+    const [base] = splitExt(fileName);
+    const prefix = `${base}_`;
+    const backups = [];
+    for await (const [name, handle] of backupsDir.entries()) {
+      if (handle.kind !== 'file' || !name.startsWith(prefix)) continue;
+      const file = await handle.getFile();
+      backups.push({ name, fileHandle: handle, lastModified: file.lastModified });
+    }
+    backups.sort((a, b) => b.lastModified - a.lastModified);
+    return backups;
+  }
+
+  return { create, list };
+})();
+
+
+'use strict';
+// Repository list screen — add/remove/reorder/reauthorize repositories,
+// and open a repository into the file browser (browser.js).
+const Repositories = (() => {
+  function el(id) { return document.getElementById(id); }
+
+  function render() {
+    const list = el('repo-list');
+    list.innerHTML = '';
+
+    if (!State.repositories.length) {
+      el('repo-empty-hint').hidden = false;
+      return;
+    }
+    el('repo-empty-hint').hidden = true;
+
+    State.repositories.forEach((repo, idx) => {
+      const item = document.createElement('div');
+      item.className = 'repo-item';
+      if (repo.colorTag) item.style.borderLeftColor = repo.colorTag;
+
+      const name = document.createElement('span');
+      name.className = 'repo-item-name';
+      name.textContent = repo.name;
+      item.appendChild(name);
+
+      if (repo.permission !== 'granted') {
+        const badge = document.createElement('button');
+        badge.className = 'repo-item-reauth';
+        badge.textContent = 'Ré-autoriser';
+        badge.title = 'La permission d\'accès à ce dossier a expiré ou a été révoquée';
+        badge.addEventListener('click', async e => {
+          e.stopPropagation();
+          await reauthorize(repo);
+        });
+        item.appendChild(badge);
+      }
+
+      const actions = document.createElement('span');
+      actions.className = 'repo-item-actions';
+
+      const upBtn = document.createElement('button');
+      upBtn.textContent = '↑';
+      upBtn.title = 'Monter';
+      upBtn.disabled = idx === 0;
+      upBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        await moveRepository(repo.id, -1);
+        render();
+      });
+      actions.appendChild(upBtn);
+
+      const downBtn = document.createElement('button');
+      downBtn.textContent = '↓';
+      downBtn.title = 'Descendre';
+      downBtn.disabled = idx === State.repositories.length - 1;
+      downBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        await moveRepository(repo.id, 1);
+        render();
+      });
+      actions.appendChild(downBtn);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Retirer ce dépôt (le dossier réel n\'est pas supprimé)';
+      removeBtn.addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!confirm(`Retirer le dépôt "${repo.name}" ? Le dossier lui-même n'est pas supprimé.`)) return;
+        await removeRepository(repo.id);
+        render();
+      });
+      actions.appendChild(removeBtn);
+
+      item.appendChild(actions);
+
+      item.addEventListener('click', () => open(repo));
+      list.appendChild(item);
+    });
+  }
+
+  async function reauthorize(repo) {
+    const result = await reauthorizeRepository(repo);
+    if (result !== 'granted') {
+      alert('Permission refusée — le dépôt reste inaccessible.');
+    }
+    render();
+  }
+
+  async function open(repo) {
+    if (repo.permission !== 'granted') {
+      await reauthorize(repo);
+      if (repo.permission !== 'granted') return;
+    }
+    State.activeRepositoryId = repo.id;
+    resetDirStack(); // always start browsing at the repo's root
+    el('repo-screen').hidden = true;
+    el('browser-screen').hidden = false;
+    await Browser.openActive();
+  }
+
+  async function addViaPicker() {
+    if (!FSA.supported()) {
+      alert('La File System Access API n\'est pas disponible dans ce navigateur — utilisez Chrome, Edge ou Brave.');
+      return;
+    }
+    let dirHandle;
+    try {
+      dirHandle = await FSA.pickDirectory();
+    } catch (e) {
+      if (e.name === 'AbortError') return; // user cancelled the picker
+      throw e;
+    }
+    // A given folder shouldn't be registered twice — isSameEntry avoids a
+    // duplicate repository pointing at the same directory.
+    for (const repo of State.repositories) {
+      if (await repo.dirHandle.isSameEntry(dirHandle)) {
+        alert('Ce dossier est déjà enregistré comme dépôt.');
+        return;
+      }
+    }
+    const repo = await addRepository(dirHandle);
+    await maybeRestoreDurableConfig(repo);
+    render();
+  }
+
+  function showList() {
+    State.activeRepositoryId = null;
+    el('browser-screen').hidden = true;
+    el('repo-screen').hidden = false;
+    render();
+  }
+
+  function init() {
+    el('repo-add-btn').addEventListener('click', addViaPicker);
+    render();
+  }
+
+  return { init, render, showList };
+})();
+
+
+'use strict';
+// Global settings screen — reachable from any screen (repository list,
+// file browser, note editor — explicit user request), each one remembering
+// where to return to on close, same principle as zettelium-android where
+// the editor's "⋮" menu got a "Réglages" entry specifically because
+// "le menu réglages n'est disponible que sur la page d'accueil" was a
+// complaint (round 19) — the editor keeps its state/ViewModel-equivalent
+// (`Editor`'s closure variables) alive underneath, no data lost on return.
+// Holds the settings that are global to the app (theme, file extensions,
+// Zettelkasten ID detection/generation) — per-repository settings
+// (extension in links) live in the repo-options dialog instead, wired from
+// browser.js.
+const Settings = (() => {
+  function el(id) { return document.getElementById(id); }
+
+  let _returnScreenId = 'repo-screen';
+
+  function open(returnScreenId = 'repo-screen') {
+    _returnScreenId = returnScreenId;
+    el(returnScreenId).hidden = true;
+    el('settings-screen').hidden = false;
+    sync();
+  }
+
+  function close() {
+    el('settings-screen').hidden = true;
+    el(_returnScreenId).hidden = false;
+  }
+
+  function populateSchemeOptions() {
+    const select = el('settings-scheme');
+    select.innerHTML = '';
+    for (const name of getAllSchemeNames()) {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+      select.appendChild(option);
+    }
+  }
+
+  // Rangée d'aperçu sombre + rangée d'aperçu clair du thème actif — porté de
+  // `SchemePreviewSwatch`/la disposition `SettingsScreen.kt` (6 pastilles par
+  // rangée : fond/texte/sélection/titre/commentaire/balisage).
+  function renderSchemePreview() {
+    const scheme = getScheme(State.settings.scheme);
+    const darkRow = el('settings-scheme-preview-dark');
+    const lightRow = el('settings-scheme-preview-light');
+    darkRow.innerHTML = '';
+    lightRow.innerHTML = '';
+    for (const key of ['bg', 'fg', 'bgSel', 'heading', 'comment', 'markup']) {
+      const dark = document.createElement('span');
+      dark.className = 'scheme-swatch';
+      dark.style.background = scheme[key];
+      darkRow.appendChild(dark);
+
+      const light = document.createElement('span');
+      light.className = 'scheme-swatch';
+      light.style.background = scheme[key + 'Alt'];
+      lightRow.appendChild(light);
+    }
+  }
+
+  function sync() {
+    populateSchemeOptions();
+    el('settings-scheme').value = State.settings.scheme;
+    el('settings-dark-mode').checked = State.settings.darkMode;
+    renderSchemePreview();
+
+    el('settings-extensions-input').value = State.settings.noteExtensions;
+    el('settings-extensions-all').checked = State.settings.noteExtensionsFilterDisabled;
+    el('settings-extensions-input').disabled = State.settings.noteExtensionsFilterDisabled;
+    el('settings-id-pattern').value = State.settings.idPattern;
+    el('settings-id-format').value = State.settings.idGenerationFormat;
+    updateIdPreview();
+  }
+
+  // Aperçu en direct : l'ID que produirait le format de génération actuel,
+  // et s'il est reconnu par le motif de détection actuel — les deux
+  // réglages sont indépendants (une regex n'est pas inversible en général,
+  // voir zettelkasten.js), cet aperçu aide à les garder cohérents sans les
+  // déduire automatiquement l'un de l'autre (même aide visuelle qu'Android).
+  function updateIdPreview() {
+    const generated = ZettelkastenLinks.generateId(new Date(), State.settings.idGenerationFormat);
+    const regex = ZettelkastenLinks.compileIdRegex(State.settings.idPattern);
+    const recognised = regex.test(generated);
+    el('settings-id-preview').textContent = recognised
+      ? `Exemple d'ID généré : ${generated} (reconnu par le motif de détection)`
+      : `Exemple d'ID généré : ${generated} (⚠ NON reconnu par le motif de détection actuel)`;
+  }
+
+  function init() {
+    el('repo-settings-btn').addEventListener('click', () => open('repo-screen'));
+    el('browser-settings-btn').addEventListener('click', () => open('browser-screen'));
+    el('settings-back-btn').addEventListener('click', close);
+
+    el('settings-scheme').addEventListener('change', async e => {
+      await setScheme(e.target.value);
+      renderSchemePreview();
+    });
+    el('settings-dark-mode').addEventListener('change', e => setDarkMode(e.target.checked));
+    el('settings-edit-theme-btn').addEventListener('click', () => ThemeEditor.openList(sync));
+
+    el('settings-extensions-input').addEventListener('change', e => setNoteExtensions(e.target.value));
+    el('settings-extensions-all').addEventListener('change', async e => {
+      await setNoteExtensionsFilterDisabled(e.target.checked);
+      sync();
+    });
+    el('settings-id-pattern').addEventListener('input', async e => {
+      await setIdPattern(e.target.value);
+      updateIdPreview();
+    });
+    el('settings-id-format').addEventListener('input', async e => {
+      await setIdGenerationFormat(e.target.value);
+      updateIdPreview();
+    });
+  }
+
+  return { init, open };
+})();
+
+
+'use strict';
+// Theme list + color editor — faithful port of zettelium-android's
+// `EditorThemesScreen.kt` (list: swatches/name/active-check/duplicate/edit/
+// delete; editor: name field, Sombre/Clair tabs, 6 color rows, Annuler/
+// Enregistrer). Reached from Settings ("Modifier les couleurs" button).
+//
+// Deliberate deviation: each color row's swatch opens the browser's native
+// `<input type="color">` picker instead of Android's custom hue-wheel
+// `ColorPickerDialog` — every browser already ships an equivalent
+// hue/saturation picker for free, reimplementing one in canvas would be
+// pure duplication for the same end result (pick a color, get its hex).
+const ThemeEditor = (() => {
+  function el(id) { return document.getElementById(id); }
+
+  const COLOR_FIELDS = [
+    { key: 'bg', altKey: 'bgAlt', label: 'Fond' },
+    { key: 'fg', altKey: 'fgAlt', label: 'Texte' },
+    { key: 'bgSel', altKey: 'bgSelAlt', label: 'Sélection' },
+    { key: 'heading', altKey: 'headingAlt', label: 'Titre' },
+    { key: 'comment', altKey: 'commentAlt', label: 'Commentaire' },
+    { key: 'markup', altKey: 'markupAlt', label: 'Balisage' }
+  ];
+
+  let _onReturnToSettings = null;
+  let _editing = null; // { originalName, colors, tab } while the editor sub-screen is open
+
+  function isCustom(name) {
+    return Object.prototype.hasOwnProperty.call(customSchemes, name);
+  }
+
+  // --- Liste des thèmes ------------------------------------------------------
+
+  function openList(onReturn) {
+    _onReturnToSettings = onReturn;
+    el('settings-screen').hidden = true;
+    el('theme-editor-screen').hidden = true;
+    el('theme-list-screen').hidden = false;
+    renderList();
+  }
+
+  function backToSettings() {
+    el('theme-list-screen').hidden = true;
+    el('settings-screen').hidden = false;
+    if (_onReturnToSettings) _onReturnToSettings();
+  }
+
+  function swatch(hex) {
+    const span = document.createElement('span');
+    span.className = 'scheme-swatch';
+    span.style.background = hex;
+    return span;
+  }
+
+  function renderList() {
+    const list = el('theme-list');
+    list.innerHTML = '';
+    for (const name of getAllSchemeNames()) {
+      const scheme = getScheme(name);
+      const row = document.createElement('div');
+      row.className = 'theme-row';
+
+      const swatches = document.createElement('span');
+      swatches.className = 'theme-row-swatches';
+      swatches.appendChild(swatch(scheme.bg));
+      swatches.appendChild(swatch(scheme.heading));
+      swatches.appendChild(swatch(scheme.bgAlt));
+      row.appendChild(swatches);
+
+      const label = document.createElement('span');
+      label.className = 'theme-row-name';
+      label.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+      row.appendChild(label);
+
+      if (name === State.settings.scheme) {
+        const check = document.createElement('span');
+        check.className = 'theme-row-active';
+        check.textContent = '✓';
+        row.appendChild(check);
+      }
+
+      row.addEventListener('click', async () => {
+        await setScheme(name);
+        renderList();
+      });
+
+      const actions = document.createElement('span');
+      actions.className = 'theme-row-actions';
+
+      const dupBtn = document.createElement('button');
+      dupBtn.textContent = '⧉';
+      dupBtn.title = 'Dupliquer';
+      dupBtn.addEventListener('click', e => { e.stopPropagation(); openDuplicateDialog(name, scheme); });
+      actions.appendChild(dupBtn);
+
+      const editBtn = document.createElement('button');
+      editBtn.textContent = '✎';
+      editBtn.title = 'Modifier';
+      editBtn.addEventListener('click', e => { e.stopPropagation(); openEditor(name, scheme); });
+      actions.appendChild(editBtn);
+
+      if (isCustom(name)) {
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '✕';
+        delBtn.title = 'Supprimer';
+        delBtn.addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm(`Supprimer le thème "${name}" ?`)) return;
+          await deleteCustomScheme(name);
+          renderList();
+        });
+        actions.appendChild(delBtn);
+      }
+      row.appendChild(actions);
+
+      list.appendChild(row);
+    }
+  }
+
+  // --- Dupliquer (dialogue nom) -----------------------------------------------
+
+  function openDuplicateDialog(name, scheme) {
+    el('theme-dup-name').value = `${name}_copy`;
+    el('theme-dup-error').textContent = '';
+    el('theme-dup-dlg').dataset.sourceScheme = JSON.stringify(Themes.sixColorsFromScheme(scheme));
+    el('theme-dup-dlg').showModal();
+    el('theme-dup-name').focus();
+    el('theme-dup-name').select();
+  }
+
+  async function confirmDuplicate() {
+    const dlg = el('theme-dup-dlg');
+    const name = el('theme-dup-name').value.trim();
+    if (!name) { el('theme-dup-error').textContent = 'Le nom ne peut pas être vide.'; return; }
+    if (getAllSchemeNames().includes(name)) { el('theme-dup-error').textContent = `Un thème "${name}" existe déjà.`; return; }
+    const colors = JSON.parse(dlg.dataset.sourceScheme);
+    await saveCustomScheme(name, colors);
+    dlg.close();
+    renderList();
+  }
+
+  // --- Éditeur d'un thème ------------------------------------------------------
+
+  function openEditor(originalName, scheme) {
+    _editing = {
+      originalName,
+      colors: Themes.sixColorsFromScheme(scheme),
+      tab: State.settings.darkMode ? 0 : 1 // même résolution que le mode sombre/clair actif — voir theme-editor.js header
+    };
+    el('theme-editor-title').textContent = originalName ? `Modifier "${originalName}"` : 'Nouveau thème';
+    el('theme-editor-name').value = originalName;
+    el('theme-list-screen').hidden = true;
+    el('theme-editor-screen').hidden = false;
+    renderTabs();
+    renderColorFields();
+    updateSaveEnabled();
+  }
+
+  function newTheme() {
+    openEditor('', getScheme('default'));
+  }
+
+  function renderTabs() {
+    el('theme-tab-dark').classList.toggle('active', _editing.tab === 0);
+    el('theme-tab-light').classList.toggle('active', _editing.tab === 1);
+  }
+
+  function renderColorFields() {
+    const container = el('theme-editor-colors');
+    container.innerHTML = '';
+    const dark = _editing.tab === 0;
+    for (const field of COLOR_FIELDS) {
+      const key = dark ? field.key : field.altKey;
+      const value = _editing.colors[key];
+
+      const row = document.createElement('div');
+      row.className = 'theme-color-row';
+
+      const label = document.createElement('span');
+      label.className = 'theme-color-label';
+      label.textContent = field.label;
+      row.appendChild(label);
+
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      colorInput.value = /^#[0-9a-fA-F]{6}$/.test(value) ? value : '#000000';
+
+      const hexInput = document.createElement('input');
+      hexInput.type = 'text';
+      hexInput.className = 'theme-color-hex';
+      hexInput.value = value;
+
+      function setValue(v) {
+        _editing.colors[key] = v;
+        if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+          hexInput.classList.remove('invalid');
+          colorInput.value = v;
+        } else {
+          hexInput.classList.add('invalid');
+        }
+      }
+
+      colorInput.addEventListener('input', e => { hexInput.value = e.target.value; setValue(e.target.value); });
+      hexInput.addEventListener('input', e => setValue(e.target.value));
+
+      row.appendChild(colorInput);
+      row.appendChild(hexInput);
+      container.appendChild(row);
+    }
+  }
+
+  function updateSaveEnabled() {
+    el('theme-editor-save').disabled = el('theme-editor-name').value.trim() === '';
+  }
+
+  function switchTab(tab) {
+    _editing.tab = tab;
+    renderTabs();
+    renderColorFields();
+  }
+
+  async function saveTheme() {
+    const newName = el('theme-editor-name').value.trim();
+    if (!newName) return;
+    const { originalName, colors } = _editing;
+    // Même règle qu'Android : renommer un thème personnalisé (pas un des 8
+    // intégrés) supprime l'ancienne entrée sous son ancien nom.
+    if (originalName && isCustom(originalName) && originalName !== newName) {
+      await deleteCustomScheme(originalName);
+    }
+    await saveCustomScheme(newName, colors);
+    backToList();
+  }
+
+  function backToList() {
+    _editing = null;
+    el('theme-editor-screen').hidden = true;
+    el('theme-list-screen').hidden = false;
+    renderList();
+  }
+
+  function init() {
+    el('theme-list-back-btn').addEventListener('click', backToSettings);
+    el('theme-list-new-btn').addEventListener('click', newTheme);
+
+    el('theme-dup-create').addEventListener('click', confirmDuplicate);
+    el('theme-dup-cancel').addEventListener('click', () => el('theme-dup-dlg').close());
+
+    el('theme-editor-back-btn').addEventListener('click', backToList);
+    el('theme-editor-name').addEventListener('input', updateSaveEnabled);
+    el('theme-tab-dark').addEventListener('click', () => switchTab(0));
+    el('theme-tab-light').addEventListener('click', () => switchTab(1));
+    el('theme-editor-cancel').addEventListener('click', backToList);
+    el('theme-editor-save').addEventListener('click', saveTheme);
+  }
+
+  return { init, openList };
+})();
+
+
+'use strict';
+// File browser for the active repository — subfolder navigation (phase 6,
+// generalizes writhdeck-web's dirStack/scanDir pattern) plus an inline
+// search bar (phase 4, folded in here rather than a separate screen —
+// desktop web has the room Android's smaller screen doesn't) which also
+// hosts the note-sort toggle (name / last modified, like Android's
+// AppSettings.noteSortOrder). Clicking a file opens it in the real editor
+// (editor.js); clicking a folder row descends into it; search always
+// searches the whole repository regardless of the folder being browsed
+// (same as Android — never scoped to the current subfolder).
+const Browser = (() => {
+  function el(id) { return document.getElementById(id); }
+
+  const SEARCH_PLACEHOLDERS = {
+    name: 'Rechercher par nom…',
+    content: 'Rechercher dans le contenu…',
+    tag: 'Rechercher un tag (sans #)…'
+  };
+
+  let _searchMode = 'name'; // 'name' | 'content' | 'tag'
+  let _searchDebounce = null;
+
+  function sortFiles(files) {
+    const sorted = [...files];
+    if (State.settings.noteSortOrder === 'modified') {
+      sorted.sort((a, b) => b.lastModified - a.lastModified); // most recent first
+    } else {
+      sorted.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return sorted;
+  }
+
+  function matchesQuery(entry, q) {
+    if (_searchMode === 'name') return entry.name.toLowerCase().includes(q) || entry.title.toLowerCase().includes(q);
+    if (_searchMode === 'content') return entry.content.toLowerCase().includes(q);
+    if (_searchMode === 'tag') return [...entry.tags].some(t => t.toLowerCase().includes(q));
+    return false;
+  }
+
+  function updateBreadcrumb() {
+    el('browser-title').textContent = State.dirStack.map(s => s.name).join(' / ');
+  }
+
+  function renderFileRow(file) {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+
+    const name = document.createElement('span');
+    name.className = 'file-item-name';
+    name.textContent = file.name;
+    item.appendChild(name);
+
+    const meta = document.createElement('span');
+    meta.className = 'file-item-meta';
+    const dateStr = new Date(file.lastModified).toLocaleString();
+    // Search results can come from a subfolder (path !== name) — show it,
+    // since two notes in different folders can share the same bare name.
+    meta.textContent = (file.path && file.path !== file.name) ? `${file.path} — ${dateStr}` : dateStr;
+    item.appendChild(meta);
+
+    item.addEventListener('click', () => Editor.open(file));
+    return item;
+  }
+
+  // Plain browse mode (no search query) — ".." row (unless at the repo
+  // root), then subfolders, then files, à la classic file manager.
+  function renderBrowseRows(list) {
+    let anyRow = false;
+
+    if (State.dirStack.length > 1) {
+      const up = document.createElement('div');
+      up.className = 'file-item folder-item';
+      up.textContent = '⬆ ..';
+      up.addEventListener('click', async () => { await dirUp(); render(); });
+      list.appendChild(up);
+      anyRow = true;
+    }
+
+    for (const subdir of State.dirSubdirs) {
+      const item = document.createElement('div');
+      item.className = 'file-item folder-item';
+      item.textContent = `📁 ${subdir.name}`;
+      item.addEventListener('click', async () => { await dirEnter(subdir); render(); });
+      list.appendChild(item);
+      anyRow = true;
+    }
+
+    for (const file of sortFiles(State.repoFiles)) {
+      list.appendChild(renderFileRow(file));
+      anyRow = true;
+    }
+
+    el('browser-empty-hint').hidden = anyRow;
+    el('browser-empty-hint').textContent = 'Aucun fichier ni sous-dossier ici.';
+  }
+
+  function render() {
+    const repo = activeRepository();
+    updateBreadcrumb();
+    syncRepoOptionsUI();
+    updateSortButton();
+
+    const list = el('browser-list');
+    list.innerHTML = '';
+
+    const query = el('browser-search-input').value.trim();
+    if (!query) {
+      renderBrowseRows(list);
+      return;
+    }
+
+    // Searching reaches into the recursive index (Index.entries), so it
+    // surfaces notes from every subfolder regardless of which one is
+    // currently being browsed — same as Android's search screen, never
+    // scoped to the current folder.
+    const results = repo
+      ? sortFiles(Index.entries(repo.id).filter(e => matchesQuery(e, query.toLowerCase())))
+      : [];
+    el('browser-empty-hint').hidden = results.length > 0;
+    el('browser-empty-hint').textContent = 'Aucun résultat.';
+    results.forEach(file => list.appendChild(renderFileRow(file)));
+  }
+
+  function scheduleRender() {
+    if (_searchDebounce) clearTimeout(_searchDebounce);
+    _searchDebounce = setTimeout(render, 150);
+  }
+
+  async function rescan() {
+    await scanActiveRepo();
+    render();
+  }
+
+  // Search and link repair (phase 4/5) both need the repo's index built —
+  // kicked off whenever the browser opens/refreshes, in the background: the
+  // flat file list (fast, root-only) renders immediately, indexing (which
+  // walks the whole tree, see fsa.js) can take longer on a big repo — same
+  // tradeoff Android hit (~20s on 360 files the first time, then cached by
+  // lastModified). Only the repair button is disabled meanwhile — a search
+  // typed while indexing is still running just returns partial results that
+  // complete themselves once it's done, rewriting files against a stale
+  // index would be the actually risky one.
+  async function reindexActive() {
+    const repo = activeRepository();
+    if (!repo) return;
+    el('browser-repair-btn').disabled = true;
+    try {
+      await Index.indexRepository(repo);
+      render(); // refresh in case a search was already active
+    } finally {
+      el('browser-repair-btn').disabled = false;
+    }
+  }
+
+  async function openActive() {
+    await rescan();
+    reindexActive(); // not awaited — see reindexActive() comment
+  }
+
+  async function repairAllLinks() {
+    const repo = activeRepository();
+    if (!repo) return;
+    el('browser-repair-btn').disabled = true;
+    try {
+      const count = await Index.repairAllLinks(repo.id, repo);
+      alert(count > 0 ? `${count} note(s) mise(s) à jour.` : 'Aucun lien à réparer.');
+    } finally {
+      el('browser-repair-btn').disabled = false;
+    }
+  }
+
+  function updateSortButton() {
+    const btn = el('browser-sort-btn');
+    if (State.settings.noteSortOrder === 'modified') {
+      btn.textContent = '🕒';
+      btn.title = 'Trier par nom (actuellement : dernière modification)';
+    } else {
+      btn.textContent = '🔤';
+      btn.title = 'Trier par dernière modification (actuellement : nom)';
+    }
+  }
+
+  async function toggleSort() {
+    await setNoteSortOrder(State.settings.noteSortOrder === 'modified' ? 'name' : 'modified');
+    render();
+  }
+
+  function syncRepoOptionsUI() {
+    const repo = activeRepository();
+    el('repo-options-include-extension').checked = !!(repo && repo.includeExtensionInLinks);
+  }
+
+  function openRepoOptions() {
+    if (!activeRepository()) return;
+    syncRepoOptionsUI();
+    el('repo-options-dlg').showModal();
+  }
+
+  // Back button goes up one folder first, like a normal file manager —
+  // only leaves the repository entirely once already at its root (mirrors
+  // Android's BrowserScreen: "navigateUp() renvoie false à la racine, seul
+  // cas où l'écran se quitte réellement").
+  async function backOrUp() {
+    if (await dirUp()) { render(); return; }
+    Repositories.showList();
+  }
+
+  function init() {
+    el('browser-back-btn').addEventListener('click', backOrUp);
+    el('browser-refresh-btn').addEventListener('click', async () => { await rescan(); reindexActive(); });
+    el('browser-repair-btn').addEventListener('click', repairAllLinks);
+    el('browser-sort-btn').addEventListener('click', toggleSort);
+
+    el('browser-search-input').addEventListener('input', scheduleRender);
+    for (const btn of document.querySelectorAll('#browser-search-mode button')) {
+      btn.addEventListener('click', () => {
+        _searchMode = btn.dataset.mode;
+        for (const b of document.querySelectorAll('#browser-search-mode button')) b.classList.toggle('active', b === btn);
+        el('browser-search-input').placeholder = SEARCH_PLACEHOLDERS[_searchMode];
+        render();
+      });
+    }
+
+    el('browser-options-btn').addEventListener('click', openRepoOptions);
+    el('repo-options-close').addEventListener('click', () => el('repo-options-dlg').close());
+    el('repo-options-include-extension').addEventListener('change', async e => {
+      const repo = activeRepository();
+      if (!repo) return;
+      await setIncludeExtensionInLinks(repo, e.target.checked);
+    });
+  }
+
+  return { init, render, rescan, openActive };
+})();
+
+
+'use strict';
+// Editor screen — phase 2 (textarea+overlay technique from writhdeck-web,
+// read/write via FileSystemFileHandle) + phase 3 (preview toggle rendering
+// the real txt2tags AST to HTML) + phase 5 (Zettelkasten: insert ID/link,
+// backlinks panel, clickable resolved ZkLinks in preview, link repair on
+// open) + phase 6 (TOC, settings). Top bar and "⋮" overflow menu are a
+// faithful port of zettelium-android's `EditorScreen.kt` top app bar: TOC,
+// backlinks (badge count), preview/edit toggle, save always visible;
+// insert ID/insert link (hidden while previewing), rename, create/restore
+// backup, and settings live in the overflow menu — same order, same
+// reasoning ("actions moins fréquentes que naviguer/prévisualiser/
+// enregistrer").
+const Editor = (() => {
+  const ta  = () => document.getElementById('ed-input');
+  const pre = () => document.getElementById('ed-highlight');
+  const el  = id => document.getElementById(id);
+
+  let _repo = null;   // active Repository at the time this note was opened
+  let _file = null;   // NoteFile currently open (path, name, fileHandle, ...)
+  let _zkId = null;    // this note's own Zettelkasten ID, if any (from the index or freshly detected)
+  let _dirty = false;
+  let _previewMode = false;
+
+  async function open(file) {
+    let content;
+    try {
+      content = await FSA.readFileText(file.fileHandle);
+    } catch (e) {
+      alert(`Impossible d'ouvrir "${file.name}" : ${e.message}`);
+      return;
+    }
+
+    _repo = activeRepository();
+    _file = file;
+    _dirty = false;
+    _previewMode = false;
+    _zkId = detectZkId(file, content);
+
+    el('browser-screen').hidden = true;
+    el('editor-screen').hidden = false;
+    el('ed-wrap').hidden = false;
+    el('ed-preview').hidden = true;
+    el('editor-preview-btn').textContent = '👁';
+    el('editor-preview-btn').title = 'Aperçu';
+
+    const input = ta();
+    input.value = content;
+    rehighlight();
+    updateTitle();
+    updateBacklinksBadge();
+    input.focus();
+
+    // Rattrape un renommage fait hors de l'app depuis la dernière fois
+    // (round 5 Android, "garantie de résistance au renommage") — best-effort,
+    // ne bloque jamais l'ouverture si ça échoue.
+    if (_repo && _zkId) {
+      const target = ZettelkastenLinks.linkTarget(file.name, _repo.includeExtensionInLinks, noteExtensionsList());
+      Index.repairBacklinksFor(_repo.id, _zkId, target, file.path).catch(e =>
+        console.error('Échec de la réparation des liens à l\'ouverture', e));
+    }
+  }
+
+  // Préfère l'entrée déjà indexée (évite de reparser) ; retombe sur une
+  // détection directe si l'index n'a pas encore fini de tourner en arrière-
+  // plan (Browser.reindexActive() n'est pas attendu avant que l'utilisateur
+  // puisse cliquer un fichier).
+  function detectZkId(file, content) {
+    const indexed = _repo ? Index.findByPath(_repo.id, file.path) : undefined;
+    if (indexed) return indexed.zkId;
+    const idRegex = ZettelkastenLinks.compileIdRegex(State.settings.idPattern);
+    return ZettelkastenLinks.extractId(file.name, content, idRegex);
+  }
+
+  function updateTitle() {
+    el('editor-title').textContent = _file ? (_file.name + (_dirty ? ' •' : '')) : '';
+    el('editor-save-btn').disabled = !_dirty;
+  }
+
+  function updateBacklinksBadge() {
+    const badge = el('editor-backlinks-badge');
+    const count = (_repo && _zkId) ? Index.backlinksFor(_repo.id, _zkId, _file.path).length : 0;
+    badge.textContent = String(count);
+    badge.hidden = count === 0;
+  }
+
+  function markDirty() {
+    if (_dirty) return;
+    _dirty = true;
+    updateTitle();
+  }
+
+  function rehighlight() {
+    pre().innerHTML = Highlight.highlight(ta().value);
+    syncGutter();
+  }
+
+  // Compensates for the textarea's scrollbar width so both elements wrap
+  // text at the same width — ported from writhdeck-web's syncGutter().
+  function syncGutter() {
+    const input = ta();
+    const hl = pre();
+    const gutter = input.offsetWidth - input.clientWidth;
+    const baseRight = parseFloat(getComputedStyle(input).paddingRight) || 0;
+    hl.style.paddingRight = (baseRight + gutter) + 'px';
+  }
+
+  function syncScroll() {
+    pre().scrollTop = ta().scrollTop;
+    pre().scrollLeft = ta().scrollLeft;
+  }
+
+  function onInput() {
+    rehighlight();
+    markDirty();
+  }
+
+  // Directly assigning `input.value` (as this used to do) clears the
+  // browser's native undo history for the textarea — reported bug: Ctrl+Z
+  // stopped working after using "Insérer un ID"/"Insérer un lien", because
+  // that reset the undo stack on every insertion. `execCommand('insertText')`
+  // instead makes the browser treat the insertion like real typing (proper
+  // `beforeinput`/`input` events, integrated into undo/redo) — refocusing
+  // the textarea first is required (the button that was clicked stole
+  // focus), but that alone doesn't touch `selectionStart`/`selectionEnd`,
+  // so the insertion still lands at the right spot.
+  function insertAtCursor(text) {
+    const input = ta();
+    input.focus();
+    const usedNativeInsert = !!(document.execCommand && document.execCommand('insertText', false, text));
+    if (!usedNativeInsert) {
+      // Fallback for a browser without execCommand('insertText') support —
+      // functionally correct, just loses undo history for this one edit.
+      const start = input.selectionStart;
+      const end = input.selectionEnd;
+      const value = input.value;
+      input.value = value.slice(0, start) + text + value.slice(end);
+      const caret = start + text.length;
+      input.setSelectionRange(caret, caret);
+      onInput(); // the execCommand path already triggers our 'input' listener natively
+    }
+  }
+
+  // Même technique que insertAtCursor (undo-safe) mais remplace tout le
+  // contenu — utilisée par la restauration de sauvegarde : sélectionne tout
+  // puis "tape" le nouveau texte par-dessus.
+  function replaceAllContent(text) {
+    const input = ta();
+    input.focus();
+    input.setSelectionRange(0, input.value.length);
+    const used = !!(document.execCommand && document.execCommand('insertText', false, text));
+    if (!used) {
+      input.value = text;
+      onInput();
+    }
+  }
+
+  function insertId() {
+    insertAtCursor(ZettelkastenLinks.generateId(new Date(), State.settings.idGenerationFormat));
+  }
+
+  async function save() {
+    if (!_file || !_dirty) return;
+    const content = ta().value;
+    try {
+      const writable = await _file.fileHandle.createWritable();
+      await writable.write(content);
+      await writable.close();
+    } catch (e) {
+      alert(`Échec de l'enregistrement : ${e.message}`);
+      return;
+    }
+    _dirty = false;
+    updateTitle();
+    if (_repo) {
+      try {
+        await Index.indexNote(_repo.id, _file, content);
+        const reindexed = Index.findByPath(_repo.id, _file.path);
+        _zkId = reindexed ? reindexed.zkId : _zkId;
+        updateBacklinksBadge();
+      } catch (e) {
+        console.error('Échec de la réindexation après enregistrement', e);
+      }
+    }
+  }
+
+  // Yes/No/Cancel confirmation (Yes = save & close, No = discard & close,
+  // Cancel = stay open) via the #close-confirm-dlg <dialog> — a native
+  // confirm() only offers two buttons, which would force "Cancel" to mean
+  // "discard", with no way to abort closing altogether (same reasoning as
+  // writhdeck-web's confirmSaveBeforeClose, ported here in simplified form).
+  let _closeConfirmResolve = null;
+  function confirmSaveBeforeClose(name) {
+    el('close-confirm-msg').textContent = `Enregistrer les modifications de "${name}" avant de fermer ?`;
+    el('close-confirm-dlg').showModal();
+    return new Promise(resolve => { _closeConfirmResolve = resolve; });
+  }
+
+  // Vrai si on peut effectivement quitter la note (enregistrée si besoin, ou
+  // abandon explicite) — faux si l'utilisateur annule. Généralisé à TOUTE
+  // sortie de la note (fermeture, suivre un lien/backlink), pas seulement au
+  // bouton retour : Android avait initialement ce garde-fou seulement sur le
+  // retour, et perdait silencieusement les modifications en suivant un lien
+  // (round 19) — corrigé dès le départ ici plutôt que redécouvert plus tard.
+  async function requestLeave() {
+    if (_dirty) {
+      const choice = await confirmSaveBeforeClose(_file.name);
+      if (choice === 'cancel') return false;
+      if (choice === 'yes') await save();
+    }
+    return true;
+  }
+
+  async function requestClose() {
+    if (!(await requestLeave())) return;
+    close();
+  }
+
+  // Ouvre une autre note depuis l'éditeur (backlink, ZkLink cliqué en
+  // aperçu) — remplace la note affichée sans repasser par le navigateur.
+  async function openOther(file) {
+    if (!(await requestLeave())) return;
+    await open(file);
+  }
+
+  function close() {
+    _repo = null;
+    _file = null;
+    _zkId = null;
+    _dirty = false;
+    _previewMode = false;
+    el('editor-screen').hidden = true;
+    el('browser-screen').hidden = false;
+    Browser.rescan();
+  }
+
+  function togglePreview() {
+    _previewMode = !_previewMode;
+    if (_previewMode) {
+      const ast = Txt2TagsParser.parse(ta().value);
+      const resolveZkLink = _repo ? (zkId => Index.findByZkId(_repo.id, zkId)) : undefined;
+      el('ed-preview').innerHTML = Txt2TagsRender.renderAstToHtml(ast, { resolveZkLink });
+      el('ed-wrap').hidden = true;
+      el('ed-preview').hidden = false;
+      el('editor-preview-btn').textContent = '✏️';
+      el('editor-preview-btn').title = 'Édition';
+    } else {
+      el('ed-wrap').hidden = false;
+      el('ed-preview').hidden = true;
+      el('editor-preview-btn').textContent = '👁';
+      el('editor-preview-btn').title = 'Aperçu';
+      rehighlight();
+    }
+    updateEditorMenuVisibility();
+  }
+
+  // Clic sur un ZkLink résolu (<a data-zk-path>) dans l'aperçu — délégation
+  // d'événement sur #ed-preview, posée une seule fois à l'init (le contenu
+  // de #ed-preview est réécrit à chaque bascule aperçu/édition).
+  function onPreviewClick(e) {
+    const link = e.target.closest('.zk-link[data-zk-path]');
+    if (!link || !_repo) return;
+    e.preventDefault();
+    const entry = Index.findByPath(_repo.id, link.dataset.zkPath);
+    if (!entry) return;
+    openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified });
+  }
+
+  // --- Menu "⋮" (overflow) ----------------------------------------------------
+
+  function openEditorMenu() {
+    updateEditorMenuVisibility();
+    el('editor-menu').hidden = false;
+  }
+
+  function closeEditorMenu() {
+    el('editor-menu').hidden = true;
+  }
+
+  function toggleEditorMenu() {
+    el('editor-menu').hidden ? openEditorMenu() : closeEditorMenu();
+  }
+
+  // Insertion d'ID/lien masquée en mode aperçu (rien à éditer) — même
+  // condition qu'Android (`if (!previewMode) { ... }` dans le DropdownMenu).
+  function updateEditorMenuVisibility() {
+    el('editor-menu-insert-id').hidden = _previewMode;
+    el('editor-menu-insert-link').hidden = _previewMode;
+  }
+
+  function runMenuAction(fn) {
+    return () => { closeEditorMenu(); fn(); };
+  }
+
+  // --- Insertion de lien Zettelkasten (sélecteur filtrable) -----------------
+
+  function openLinkPicker() {
+    if (!_repo) return;
+    el('zklink-filter').value = '';
+    renderLinkPicker('');
+    el('zklink-picker-dlg').showModal();
+    el('zklink-filter').focus();
+  }
+
+  // Élément de liste à deux lignes utilisé par le sélecteur de lien et le
+  // panneau de backlinks : nom du fichier d'abord (identifiant stable et
+  // toujours présent), puis le premier titre *détecté* dans la note s'il y
+  // en a un — pas de repli sur le nom de fichier ou un paragraphe comme le
+  // ferait `entry.title` (utilisé pour l'indexation/recherche, pas ici) :
+  // demande explicite de l'utilisateur, pour ne jamais afficher deux fois
+  // la même information.
+  function renderNoteItem(entry) {
+    const item = document.createElement('div');
+    item.title = entry.zkId; // toujours utile en info-bulle, même sans l'afficher en clair
+
+    const name = document.createElement('span');
+    name.className = 'note-item-name';
+    name.textContent = entry.name;
+    item.appendChild(name);
+
+    if (entry.heading) {
+      const heading = document.createElement('span');
+      heading.className = 'note-item-heading';
+      heading.textContent = entry.heading;
+      item.appendChild(heading);
+    }
+    return item;
+  }
+
+  function renderLinkPicker(query) {
+    const q = query.trim().toLowerCase();
+    const list = el('zklink-list');
+    list.innerHTML = '';
+    const candidates = Index.entries(_repo.id)
+      .filter(e => e.zkId && (e.path !== (_file && _file.path)))
+      .filter(e => !q || e.name.toLowerCase().includes(q) || e.title.toLowerCase().includes(q) || e.zkId.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of candidates) {
+      const item = renderNoteItem(entry);
+      item.className = 'zklink-item';
+      item.addEventListener('click', () => {
+        const target = ZettelkastenLinks.linkTarget(entry.name, _repo.includeExtensionInLinks, noteExtensionsList());
+        insertAtCursor(ZettelkastenLinks.formatLink(target, entry.zkId));
+        el('zklink-picker-dlg').close();
+      });
+      list.appendChild(item);
+    }
+    el('zklink-empty-hint').hidden = candidates.length > 0;
+  }
+
+  // --- Panneau de backlinks --------------------------------------------------
+
+  function openBacklinks() {
+    if (!_repo || !_zkId) return;
+    const list = el('backlinks-list');
+    list.innerHTML = '';
+    const backlinks = Index.backlinksFor(_repo.id, _zkId, _file.path)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    el('backlinks-empty-hint').hidden = backlinks.length > 0;
+    for (const entry of backlinks) {
+      const item = renderNoteItem(entry);
+      item.className = 'backlinks-item';
+      item.addEventListener('click', () => {
+        el('backlinks-dlg').close();
+        openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified });
+      });
+      list.appendChild(item);
+    }
+    el('backlinks-dlg').showModal();
+  }
+
+  // --- Table des matières ----------------------------------------------------
+
+  function openToc() {
+    const entries = Txt2TagsToc.build(ta().value);
+    const list = el('toc-list');
+    list.innerHTML = '';
+    el('toc-empty-hint').hidden = entries.length > 0;
+
+    entries.forEach((entry, index) => {
+      const item = document.createElement('div');
+      item.className = 'toc-item';
+      item.style.paddingLeft = `${12 + (entry.level - 1) * 16}px`;
+      item.textContent = entry.title || '(sans titre)';
+      item.addEventListener('click', () => {
+        el('toc-dlg').close();
+        navigateToToc(entry, index);
+      });
+      list.appendChild(item);
+    });
+    el('toc-dlg').showModal();
+  }
+
+  // En édition : place le curseur et fait défiler jusqu'à la ligne de titre
+  // (technique du "mirror div" de writhdeck-web — mesure la position pixel
+  // réelle en tenant compte du retour à la ligne automatique). En aperçu :
+  // les entrées de TOC correspondent 1 pour 1, dans l'ordre, aux titres
+  // rendus (même détection que le parseur, voir toc.js) — on peut donc
+  // simplement prendre le Nième titre du DOM.
+  function navigateToToc(entry, index) {
+    if (_previewMode) {
+      const headings = el('ed-preview').querySelectorAll('h1, h2, h3, h4, h5, h6');
+      const target = headings[index];
+      if (target) target.scrollIntoView({ block: 'start' });
+      return;
+    }
+    const input = ta();
+    input.focus();
+    input.setSelectionRange(entry.charOffset, entry.charOffset);
+    const top = pixelTopForOffset(entry.charOffset);
+    input.scrollTop = Math.max(0, top - input.clientHeight / 3);
+  }
+
+  // Mesure la position pixel verticale du caractère à `offset` dans le
+  // textarea, en tenant compte du retour à la ligne automatique — un div
+  // caché recevant exactement le même style calculé (police, padding,
+  // largeur...) que le textarea, rempli du texte jusqu'à `offset`, donne
+  // cette hauteur via `offsetHeight`. Même technique que `linePixelTop()`
+  // dans writhdeck-web/src/editor.js (PLAN.md section 4 : "technique DOM de
+  // writhdeck-web, s'applique directement, pas de portage nécessaire").
+  function pixelTopForOffset(offset) {
+    const input = ta();
+    const style = getComputedStyle(input);
+    const mirror = document.createElement('div');
+    mirror.style.position = 'absolute';
+    mirror.style.visibility = 'hidden';
+    mirror.style.height = 'auto';
+    mirror.style.width = input.clientWidth + 'px';
+    for (const prop of ['fontFamily', 'fontSize', 'lineHeight', 'letterSpacing',
+      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+      'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+      'boxSizing', 'whiteSpace', 'wordWrap', 'overflowWrap', 'tabSize']) {
+      mirror.style[prop] = style[prop];
+    }
+    mirror.textContent = input.value.slice(0, offset);
+    document.body.appendChild(mirror);
+    const top = mirror.offsetHeight;
+    document.body.removeChild(mirror);
+    return top;
+  }
+
+  // --- Renommer (menu ⋮) -------------------------------------------------------
+
+  function openRenameDialog() {
+    if (!_file) return;
+    el('rename-note-input').value = _file.name;
+    el('rename-note-dlg').showModal();
+    el('rename-note-input').focus();
+    el('rename-note-input').select();
+  }
+
+  // Écrit d'abord les modifications en cours (le renommage conserve le
+  // contenu sur disque mais pas les édits en mémoire — même précaution
+  // qu'Android : `EditorViewModel.renameNote`), renomme via FSA, réindexe
+  // le dépôt en entier (`forceFull`, comme Android : l'ancien chemin doit
+  // disparaître de l'index, pas seulement le nouveau apparaître) puis
+  // rouvre l'éditeur sur le fichier renommé.
+  async function confirmRename() {
+    const raw = el('rename-note-input').value.trim();
+    el('rename-note-dlg').close();
+    if (!raw || !_repo || !_file || raw === _file.name) return;
+
+    const extensions = noteExtensionsList();
+    const hasRecognisedExt = extensions.some(ext => raw.toLowerCase().endsWith(ext));
+    const newName = hasRecognisedExt ? raw : raw + (extensions[0] || '');
+
+    if (_dirty) await save();
+
+    let newHandle;
+    try {
+      const parentDir = await FSA.getParentDirHandle(_repo.dirHandle, _file.path);
+      newHandle = await FSA.renameFile(_file.fileHandle, parentDir, newName);
+    } catch (e) {
+      alert(`Échec du renommage : ${e.message}`);
+      return;
+    }
+
+    const slash = _file.path.lastIndexOf('/');
+    const folderPrefix = slash >= 0 ? _file.path.slice(0, slash + 1) : '';
+    const newFile = { path: folderPrefix + newName, name: newName, fileHandle: newHandle, lastModified: Date.now() };
+
+    try {
+      await Index.indexRepository(_repo, { forceFull: true });
+    } catch (e) {
+      console.error('Échec de la réindexation après renommage', e);
+    }
+    await open(newFile);
+  }
+
+  // --- Sauvegardes (créer / restaurer) ----------------------------------------
+
+  async function createBackupNow() {
+    if (!_repo || !_file) return;
+    const name = await Backup.create(_repo, _file.name, ta().value);
+    alert(name ? `Sauvegarde créée : ${name}` : 'Échec de la sauvegarde.');
+  }
+
+  async function openBackupRestore() {
+    if (!_repo || !_file) return;
+    const backups = await Backup.list(_repo, _file.name);
+    const list = el('backup-restore-list');
+    list.innerHTML = '';
+    el('backup-restore-empty-hint').hidden = backups.length > 0;
+
+    for (const backup of backups) {
+      const item = document.createElement('div');
+      item.className = 'backup-restore-item';
+
+      const date = document.createElement('span');
+      date.className = 'backup-restore-date';
+      date.textContent = new Date(backup.lastModified).toLocaleString();
+      item.appendChild(date);
+
+      const name = document.createElement('span');
+      name.className = 'backup-restore-name';
+      name.textContent = backup.name;
+      item.appendChild(name);
+
+      // Charge le contenu choisi comme une frappe normale (marque `dirty`,
+      // ne sauvegarde pas directement) — l'utilisateur garde la main via
+      // "Enregistrer" et les garde-fous existants, même choix qu'Android
+      // ("pas un remplacement irréversible en un tap").
+      item.addEventListener('click', async () => {
+        el('backup-restore-dlg').close();
+        const content = await FSA.readFileText(backup.fileHandle);
+        replaceAllContent(content);
+      });
+      list.appendChild(item);
+    }
+    el('backup-restore-dlg').showModal();
+  }
+
+  function init() {
+    el('editor-back-btn').addEventListener('click', requestClose);
+    el('editor-save-btn').addEventListener('click', save);
+    el('editor-preview-btn').addEventListener('click', togglePreview);
+    el('editor-backlinks-btn').addEventListener('click', openBacklinks);
+    el('editor-toc-btn').addEventListener('click', openToc);
+
+    el('editor-menu-btn').addEventListener('click', toggleEditorMenu);
+    el('editor-menu-insert-id').addEventListener('click', runMenuAction(insertId));
+    el('editor-menu-insert-link').addEventListener('click', runMenuAction(openLinkPicker));
+    el('editor-menu-rename').addEventListener('click', runMenuAction(openRenameDialog));
+    el('editor-menu-backup-create').addEventListener('click', runMenuAction(createBackupNow));
+    el('editor-menu-backup-restore').addEventListener('click', runMenuAction(openBackupRestore));
+    el('editor-menu-settings').addEventListener('click', runMenuAction(() => Settings.open('editor-screen')));
+
+    document.addEventListener('click', e => {
+      if (el('editor-menu').hidden) return;
+      if (e.target === el('editor-menu-btn') || el('editor-menu').contains(e.target)) return;
+      closeEditorMenu();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !el('editor-menu').hidden) closeEditorMenu();
+    });
+
+    ta().addEventListener('input', onInput);
+    ta().addEventListener('scroll', syncScroll);
+    ta().addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        save();
+      }
+    });
+    window.addEventListener('resize', syncGutter);
+    el('ed-preview').addEventListener('click', onPreviewClick);
+
+    el('zklink-filter').addEventListener('input', e => renderLinkPicker(e.target.value));
+    el('zklink-picker-close').addEventListener('click', () => el('zklink-picker-dlg').close());
+    el('backlinks-close').addEventListener('click', () => el('backlinks-dlg').close());
+    el('toc-close').addEventListener('click', () => el('toc-dlg').close());
+
+    el('rename-note-cancel').addEventListener('click', () => el('rename-note-dlg').close());
+    el('rename-note-confirm').addEventListener('click', confirmRename);
+    el('backup-restore-close').addEventListener('click', () => el('backup-restore-dlg').close());
+
+    const respond = val => {
+      const resolve = _closeConfirmResolve;
+      _closeConfirmResolve = null;
+      el('close-confirm-dlg').close();
+      if (resolve) resolve(val);
+    };
+    el('close-confirm-yes').addEventListener('click', () => respond('yes'));
+    el('close-confirm-no').addEventListener('click', () => respond('no'));
+    el('close-confirm-cancel').addEventListener('click', () => respond('cancel'));
+    el('close-confirm-dlg').addEventListener('cancel', e => { e.preventDefault(); respond('cancel'); }); // Esc
+  }
+
+  return { init, open };
+})();
+
+
+'use strict';
+// Entry point.
+function applyTheme(schemeName = 'default', darkMode = true) {
+  const s = getScheme(schemeName);
+  const root = document.documentElement.style;
+  const pick = (key) => darkMode ? s[key] : s[key + 'Alt'];
+  root.setProperty('--bg',      pick('bg'));
+  root.setProperty('--fg',      pick('fg'));
+  root.setProperty('--bg-bar',  pick('bgBar'));
+  root.setProperty('--fg-bar',  pick('fgBar'));
+  root.setProperty('--bg-sel',  pick('bgSel'));
+  root.setProperty('--heading', pick('heading'));
+  root.setProperty('--comment', pick('comment'));
+  root.setProperty('--markup',  pick('markup'));
+  root.setProperty('--bg2',     pick('bg2'));
+}
+
+async function init() {
+  applyTheme(); // default palette immediately, no flash while loadState() (IndexedDB) is in flight
+  if (!FSA.supported()) {
+    document.getElementById('repo-support-hint').textContent =
+      'La File System Access API n\'est pas disponible dans ce navigateur — ' +
+      'utilisez Chrome, Edge ou Brave pour gérer des dépôts.';
+  }
+  await Promise.all([loadState(), Themes.loadCustomSchemes()]);
+  applyTheme(State.settings.scheme, State.settings.darkMode); // the persisted choice, once known
+  Repositories.init();
+  Settings.init();
+  ThemeEditor.init();
+  Browser.init();
+  Editor.init();
+}
+
+document.addEventListener('DOMContentLoaded', init);
+
+</script>
+</body>
+</html>

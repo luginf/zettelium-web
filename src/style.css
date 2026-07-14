@@ -1,0 +1,436 @@
+/* CSS custom properties — set by JS via applyTheme() (app.js), same variable
+   names as writhdeck-web so a future schemes.js-driven theme picker (phase 6)
+   plugs in without renaming anything here. */
+:root {
+  --bg:      #1a1a1a;
+  --fg:      #e8e8e8;
+  --bg-bar:  #2a2a2a;
+  --fg-bar:  #aaaaaa;
+  --bg-sel:  #3a5a8a;
+  --heading: #c8a060;
+  --comment: #606060;
+  --markup:  #6aa9d4;
+  --bg2:     #1a1a1a;
+
+  --font-family: system-ui, sans-serif;
+  --font-size:   15px;
+
+  /* Editor-specific (monospace, independent of the chrome font above) */
+  --ed-font-family: monospace;
+  --ed-font-size:   16px;
+  --ed-line-spacing: 1.5;
+  --ed-margin-x: 40px;
+  --ed-margin-y: 24px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  /* The page itself must never scroll — every screen is its own fixed
+     100vh flex column with an explicit scrollable region inside (the
+     textarea, a list, a dialog...). Without this, once an inner scrollable
+     region (e.g. #ed-input) hits its own scroll limit, the scroll gesture
+     chains up to the document itself, which silently pushes the "fixed"
+     header out of view even though it's flex-shrink:0 in its own
+     container — reported symptom: the editor's top bar scrolls away past
+     the bottom of a note and you have to scroll back up to see it again. */
+  overflow: hidden;
+  background: var(--bg2);
+  color: var(--fg);
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+}
+
+.hint { color: var(--fg-bar); font-size: 0.85em; padding: 8px 12px; }
+
+button {
+  cursor: pointer;
+  background: var(--bg-bar);
+  color: var(--fg-bar);
+  border: 1px solid transparent;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 0.9em;
+}
+button:hover { border-color: var(--fg-bar); }
+button:disabled { opacity: 0.4; cursor: default; }
+button:disabled:hover { border-color: transparent; }
+
+input[type="text"], select {
+  background: var(--bg-bar);
+  color: var(--fg);
+  border: 1px solid var(--fg-bar);
+  font: inherit;
+  padding: 3px 6px;
+}
+
+/* ─── Repository screen ───────────────────────────────────────────────── */
+#repo-screen, #browser-screen, #settings-screen, #theme-list-screen, #theme-editor-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+#repo-screen[hidden], #browser-screen[hidden], #settings-screen[hidden],
+#theme-list-screen[hidden], #theme-editor-screen[hidden] { display: none; }
+
+#repo-header, #browser-header, #settings-header, #theme-list-header, #theme-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#repo-title, #browser-title {
+  font-size: 1.15em;
+  font-weight: bold;
+  color: var(--fg);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#repo-list, #browser-list {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0;
+}
+
+.repo-item, .file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-left: 4px solid transparent;
+}
+.repo-item:hover, .file-item:hover { background: var(--bg-bar); }
+
+.repo-item-name, .file-item-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-item-meta {
+  font-size: 0.75em;
+  color: var(--fg-bar);
+  white-space: nowrap;
+}
+.folder-item { color: var(--heading); font-weight: 500; }
+.repo-item-reauth {
+  color: var(--heading);
+  border-color: var(--heading);
+}
+.repo-item-actions { display: flex; gap: 2px; }
+.repo-item-actions button { padding: 1px 7px; }
+
+/* ─── Browser search bar (always visible, phase 4 — replaces the old
+   extensions bar, which moved to the global Settings screen below) ─────── */
+#browser-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-bar);
+  border-top: 1px solid var(--bg2);
+  flex-wrap: wrap;
+}
+#browser-search-mode { display: flex; gap: 2px; }
+#browser-search-mode button.active { color: var(--fg); border-color: var(--heading); }
+#browser-search-input { flex: 1; min-width: 120px; }
+
+/* ─── Settings screen ──────────────────────────────────────────────────── */
+#settings-body { padding: 4px 12px 16px; overflow-y: auto; overscroll-behavior: contain; }
+.settings-section-title {
+  margin-top: 16px;
+  font-size: 0.8em;
+  color: var(--fg-bar);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.settings-section-title:first-child { margin-top: 8px; }
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bg-bar);
+}
+.settings-row input[type="text"], .settings-row select { flex: 1; max-width: 260px; }
+
+.settings-full-width-btn { display: block; width: 100%; margin: 6px 0 10px; text-align: center; }
+
+#settings-scheme-preview { padding: 4px 0; }
+.scheme-preview-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.scheme-preview-swatches { display: flex; gap: 3px; }
+
+.scheme-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--fg-bar);
+  border-radius: 2px;
+}
+
+/* ─── Theme list / editor screens ──────────────────────────────────────── */
+#theme-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.theme-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.theme-row:hover { background: var(--bg-bar); }
+.theme-row-swatches { display: flex; gap: 2px; }
+.theme-row-swatches .scheme-swatch { width: 14px; height: 14px; }
+.theme-row-name { flex: 1; }
+.theme-row-active { color: var(--heading); }
+.theme-row-actions { display: flex; gap: 2px; }
+.theme-row-actions button { padding: 1px 7px; }
+
+#theme-editor-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 4px 12px; }
+#theme-tabs { display: flex; gap: 4px; margin: 8px 0; }
+#theme-tabs button.active { color: var(--fg); border-color: var(--heading); }
+
+.theme-color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.theme-color-label { width: 96px; font-size: 0.85em; color: var(--fg-bar); flex-shrink: 0; }
+.theme-color-hex { flex: 1; font-family: monospace; }
+.theme-color-hex.invalid { border-color: #d04a4a; }
+input[type="color"] { width: 32px; height: 28px; padding: 2px; border: 1px solid var(--fg-bar); background: var(--bg-bar); }
+
+#theme-dup-body { padding: 8px 20px 4px; display: flex; flex-direction: column; gap: 4px; }
+#settings-id-preview { padding: 8px 0 0; }
+
+/* ─── Dialogs ───────────────────────────────────────────────────────────── */
+dialog {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--fg-bar);
+  padding: 0;
+  width: min(480px, 92vw);
+  max-height: 82vh;
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+
+#close-confirm-msg { padding: 16px 20px 4px; }
+.dlg-btn-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
+
+/* ─── Editor ───────────────────────────────────────────────────────────── */
+#editor-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+#editor-screen[hidden] { display: none; }
+
+#ed-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#editor-title {
+  flex: 1;
+  font-size: 1.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#ed-actions { display: flex; gap: 6px; align-items: center; }
+
+.editor-badge {
+  display: inline-block;
+  min-width: 14px;
+  padding: 0 3px;
+  margin-right: 3px;
+  border-radius: 8px;
+  background: var(--heading);
+  color: var(--bg);
+  font-size: 0.7em;
+  line-height: 16px;
+  text-align: center;
+}
+
+#editor-menu-wrap { position: relative; }
+#editor-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background: var(--bg-bar);
+  border: 1px solid var(--fg-bar);
+  z-index: 100;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+}
+#editor-menu[hidden] { display: none; }
+#editor-menu button {
+  display: block;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  white-space: nowrap;
+}
+#editor-menu button:hover { background: var(--bg-sel); }
+#editor-menu button[hidden] { display: none; }
+
+#ed-body {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+#ed-wrap { position: absolute; inset: 0; }
+#ed-wrap[hidden] { display: none; }
+
+#ed-highlight,
+#ed-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  font-family: var(--ed-font-family);
+  font-size: var(--ed-font-size);
+  line-height: var(--ed-line-spacing);
+  padding: var(--ed-margin-y) var(--ed-margin-x);
+  margin: 0;
+  border: none;
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  tab-size: 4;
+}
+#ed-highlight {
+  background: transparent;
+  color: var(--fg);
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+}
+#ed-input {
+  background: transparent;
+  color: transparent;
+  caret-color: var(--fg);
+  resize: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  z-index: 1;
+}
+#ed-input::selection { background: var(--bg-sel); color: var(--fg); }
+
+.hl-line { display: inline-block; width: 100%; min-height: 1lh; vertical-align: top; }
+.hl-heading { color: var(--heading); }
+.hl-h1 { font-size: 1.8em; line-height: calc(var(--ed-line-spacing) / 1.8); }
+.hl-h2 { font-size: 1.6em; line-height: calc(var(--ed-line-spacing) / 1.6); }
+.hl-h3 { font-size: 1.4em; line-height: calc(var(--ed-line-spacing) / 1.4); }
+.hl-h4 { font-size: 1.2em; line-height: calc(var(--ed-line-spacing) / 1.2); }
+.hl-comment { color: var(--comment); }
+.hl-markup { color: var(--markup); }
+
+#ed-preview {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--ed-margin-y) var(--ed-margin-x);
+  font-family: var(--ed-font-family);
+  font-size: var(--ed-font-size);
+  line-height: var(--ed-line-spacing);
+}
+#ed-preview[hidden] { display: none; }
+#ed-preview h1, #ed-preview h2, #ed-preview h3,
+#ed-preview h4, #ed-preview h5, #ed-preview h6 { color: var(--heading); margin: 0.6em 0 0.3em; }
+#ed-preview p { margin: 0.4em 0; }
+#ed-preview code, #ed-preview .t2t-code { background: var(--bg-bar); }
+#ed-preview .t2t-code { display: block; padding: 8px; overflow-x: auto; }
+#ed-preview code { padding: 1px 4px; }
+#ed-preview a { color: var(--markup); }
+#ed-preview .zk-link { color: var(--markup); text-decoration: underline dotted; }
+#ed-preview a.zk-link { cursor: pointer; }
+#ed-preview .t2t-image-placeholder { color: var(--fg-bar); font-style: italic; }
+#ed-preview table { border-collapse: collapse; margin: 0.4em 0; }
+#ed-preview th, #ed-preview td { border: 1px solid var(--fg-bar); padding: 4px 8px; }
+#ed-preview hr { border: none; border-top: 1px solid var(--fg-bar); margin: 1em 0; }
+
+/* ─── Zettelkasten: link picker / backlinks / TOC (phases 5-6) ─────────── */
+#zklink-picker-dlg, #backlinks-dlg, #toc-dlg, #backup-restore-dlg { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#zklink-filter { margin: 8px 12px; }
+#zklink-list, #backlinks-list, #toc-list, #backup-restore-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+
+#rename-note-body { padding: 8px 20px; }
+#rename-note-input { width: 100%; }
+
+.backup-restore-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.backup-restore-item:hover { background: var(--bg-bar); }
+.backup-restore-date { flex-shrink: 0; font-size: 0.85em; }
+.backup-restore-name { color: var(--fg-bar); font-size: 0.8em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Shared two-line item: file name first, then the note's first detected
+   heading (if any) — never a redundant title/zkId, see editor.js
+   renderNoteItem(). */
+.zklink-item, .backlinks-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.zklink-item:hover, .backlinks-item:hover { background: var(--bg-bar); }
+.note-item-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-item-heading { font-size: 0.75em; color: var(--fg-bar); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+
+.toc-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toc-item:hover { background: var(--bg-bar); }
+
+/* ─── Repository options dialog ────────────────────────────────────────── */
+#repo-options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+}
+#repo-options-body { padding: 4px 12px 12px; }
+#repo-options-body .settings-row { border-bottom: none; }
