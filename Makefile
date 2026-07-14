@@ -1,4 +1,4 @@
-JS_SRCS := src/schemes.js src/storage.js src/fsa.js \
+JS_SRCS := src/schemes.js src/icons.js src/i18n.js src/storage.js src/fsa.js \
            src/txt2tags/regexes.js src/txt2tags/ast.js src/txt2tags/inline.js \
            src/txt2tags/parser.js src/txt2tags/render.js src/txt2tags/summary.js \
            src/txt2tags/toc.js \

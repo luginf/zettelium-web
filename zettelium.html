@@ -62,6 +62,15 @@ button {
 }
 button:hover { border-color: var(--fg-bar); }
 button:disabled { opacity: 0.4; cursor: default; }
+
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; padding: 3px 8px; }
+.icon-btn svg { display: block; }
+.icon-label-btn { display: inline-flex; align-items: center; gap: 6px; }
+.icon-label-btn svg { display: block; flex-shrink: 0; }
+/* Beats the plain `#editor-menu button { display: block }` rule below
+   (same specificity family, but this one adds the class too) so the icon
+   and label actually sit flex-aligned instead of just stacking inline. */
+#editor-menu button.icon-label-btn { display: flex; align-items: center; gap: 8px; justify-content: flex-start; }
 button:disabled:hover { border-color: transparent; }
 
 input[type="text"], select {
@@ -172,6 +181,60 @@ input[type="text"], select {
 }
 .settings-row input[type="text"], .settings-row select { flex: 1; max-width: 260px; }
 
+/* Interrupteur à bascule (style Android `Switch`) — sous le capot, une
+   vraie <input type="checkbox"> (accessibilité/JS de changement inchangés,
+   seul le rendu visuel diffère d'une case à cocher native). Le libellé
+   vient toujours en premier, l'interrupteur à la fin de la ligne (demande
+   explicite : "met le label en premier et la coche ensuite"). */
+.settings-switch-row { align-items: flex-start; }
+.settings-row-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.settings-row-desc { font-size: 0.8em; color: var(--fg-bar); }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; margin-top: 2px; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+.switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-bar);
+  border: 1px solid var(--fg-bar);
+  border-radius: 11px;
+  transition: background-color 0.15s;
+}
+.switch-track::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background: var(--fg-bar);
+  border-radius: 50%;
+  transition: transform 0.15s, background-color 0.15s;
+}
+.switch input:checked + .switch-track { background: var(--bg-sel); border-color: var(--heading); }
+.switch input:checked + .switch-track::before { transform: translateX(18px); background: var(--heading); }
+
+.settings-stepper { display: flex; align-items: center; gap: 8px; }
+.settings-stepper button { padding: 2px 10px; }
+.settings-stepper-value {
+  min-width: 3.5em;
+  max-width: 4.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font: inherit;
+  background: var(--bg-bar);
+  color: var(--fg);
+  border: 1px solid var(--fg-bar);
+  padding: 2px 4px;
+}
+/* Masque les flèches natives du <input type=number> (Chrome/Edge) — les
+   boutons -/+ existants les rendent redondantes. */
+.settings-stepper-value::-webkit-inner-spin-button,
+.settings-stepper-value::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.settings-stepper-value { -moz-appearance: textfield; }
+
+.settings-radio-group { padding: 2px 0 8px; }
+.settings-radio-row { display: flex; align-items: center; gap: 8px; padding: 6px 16px; cursor: pointer; }
+
 .settings-full-width-btn { display: block; width: 100%; margin: 6px 0 10px; text-align: center; }
 
 #settings-scheme-preview { padding: 4px 0; }
@@ -273,6 +336,12 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
   line-height: 16px;
   text-align: center;
 }
+/* `.editor-badge`'s own `display` has the same specificity as the UA
+   stylesheet's `[hidden] { display: none }` and comes later in the
+   cascade, so it was winning and showing a "0" badge even when hidden was
+   set — explicit override restores the expected behavior (no badge at
+   all with zero backlinks, matching zettelium-android). */
+.editor-badge[hidden] { display: none; }
 
 #editor-menu-wrap { position: relative; }
 #editor-menu {
@@ -300,11 +369,27 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #editor-menu button:hover { background: var(--bg-sel); }
 #editor-menu button[hidden] { display: none; }
 
+/* `#ed-body` est une ligne flex (éditeur/aperçu + panneau TOC latéral en
+   option, round 11) — le panneau, quand affiché, rétrécit réellement la
+   colonne de l'éditeur (vrai partage de l'espace, pas une surimpression),
+   même technique que writhdeck-web's `#ed-body`/`#toc-panel`. */
 #ed-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* `#ed-main` reprend le rôle que jouait `#ed-body` avant round 11 (les
+   deux panneaux édition/aperçu s'y superposent en position absolue selon
+   le mode courant). */
+#ed-main {
   flex: 1;
   position: relative;
   overflow: hidden;
   background: var(--bg);
+  min-width: 0; /* un enfant flex ne rétrécit pas sous son contenu par défaut */
 }
 
 #ed-wrap { position: absolute; inset: 0; }
@@ -382,8 +467,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #ed-preview hr { border: none; border-top: 1px solid var(--fg-bar); margin: 1em 0; }
 
 /* ─── Zettelkasten: link picker / backlinks / TOC (phases 5-6) ─────────── */
-#zklink-picker-dlg, #backlinks-dlg, #toc-dlg, #backup-restore-dlg { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
-#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header {
+#zklink-picker-dlg, #backlinks-dlg, #toc-dlg, #backup-restore-dlg, #tag-browser-dlg { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header, #tag-browser-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -392,7 +477,19 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
   flex-shrink: 0;
 }
 #zklink-filter { margin: 8px 12px; }
-#zklink-list, #backlinks-list, #toc-list, #backup-restore-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+#zklink-list, #backlinks-list, #toc-list, #backup-restore-list, #tag-browser-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+
+.tag-browser-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.tag-browser-item:hover { background: var(--bg-bar); }
+.tag-browser-tag { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag-browser-count { color: var(--fg-bar); font-size: 0.8em; }
 
 #rename-note-body { padding: 8px 20px; }
 #rename-note-input { width: 100%; }
@@ -431,6 +528,28 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 .toc-item:hover { background: var(--bg-bar); }
 
+/* ─── Panneau TOC latéral (round 11, sur le modèle de writhdeck-web) ────── */
+#toc-panel {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--bg-bar);
+  background: var(--bg);
+  overflow: hidden;
+}
+#toc-panel[hidden] { display: none; } /* voir la note sur [hidden] + display ailleurs dans ce fichier */
+#toc-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#toc-panel-header span:first-child { flex: 1; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#toc-panel-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+
 /* ─── Repository options dialog ────────────────────────────────────────── */
 #repo-options-header {
   display: flex;
@@ -442,6 +561,45 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #repo-options-body { padding: 4px 12px 12px; }
 #repo-options-body .settings-row { border-bottom: none; }
 
+/* ─── Per-note actions (create / rename / move / delete, round 8-gap) ──── */
+.file-item-actions-btn { flex-shrink: 0; }
+
+#new-note-header, #note-actions-header, #note-rename-header, #note-move-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+}
+#new-note-body, #note-rename-body { padding: 8px 20px; }
+#new-note-input, #note-rename-input { width: 100%; }
+
+#note-actions-body { display: flex; flex-direction: column; padding: 4px 0; }
+#note-actions-body button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  width: 100%;
+}
+#note-actions-body button:hover { background: var(--bg-sel); }
+
+#note-move-dlg { width: min(440px, 92vw); max-height: 78vh; display: flex; flex-direction: column; }
+#note-move-body { padding: 4px 16px 8px; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+#note-move-file { padding: 4px 0; }
+#note-move-repo-row { border-bottom: none; }
+#note-move-breadcrumb { font-size: 0.85em; color: var(--fg-bar); padding: 8px 0 4px; border-bottom: 1px solid var(--bg-bar); }
+#note-move-list { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }
+#note-move-list .file-item { padding: 6px 4px; cursor: pointer; }
+#note-move-list .file-item svg { flex-shrink: 0; }
+
+#external-conflict-dlg { width: min(440px, 92vw); }
+#external-conflict-msg { padding: 16px 20px 4px; }
+
 </style>
 </head>
 <body>
@@ -450,13 +608,10 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 <div id="repo-screen">
   <div id="repo-header">
     <span id="repo-title">Zettelium</span>
-    <button id="repo-settings-btn" title="Réglages">⚙</button>
-    <button id="repo-add-btn" title="Ajouter un dépôt (dossier)">+ Dépôt</button>
+    <button id="repo-settings-btn" data-i18n-title="common.settings" class="icon-btn"></button>
+    <button id="repo-add-btn" data-i18n-title="repo.addTooltip" data-i18n="repo.addButton"></button>
   </div>
-  <p id="repo-empty-hint" class="hint" hidden>
-    Aucun dépôt enregistré. Un dossier est un dossier réel sur votre disque —
-    cliquez sur « + Dépôt » pour en choisir un.
-  </p>
+  <p id="repo-empty-hint" class="hint" data-i18n="repo.emptyHint" hidden></p>
   <div id="repo-list"></div>
   <p class="hint" id="repo-support-hint"></p>
 </div>
@@ -464,38 +619,105 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 <!-- Global settings screen -->
 <div id="settings-screen" hidden>
   <div id="settings-header">
-    <button id="settings-back-btn" title="Retour">←</button>
-    <span>Réglages</span>
+    <button id="settings-back-btn" data-i18n-title="common.back">←</button>
+    <span data-i18n="settings.screenTitle"></span>
   </div>
   <div id="settings-body">
-    <p class="settings-section-title">Thème</p>
-    <label class="settings-row"><span>Palette de couleurs</span>
+    <p class="settings-section-title" data-i18n="settings.sectionTheme"></p>
+    <div class="settings-radio-group" id="settings-theme-mode">
+      <label class="settings-radio-row"><input type="radio" name="settings-theme-mode" value="system"> <span data-i18n="common.system"></span></label>
+      <label class="settings-radio-row"><input type="radio" name="settings-theme-mode" value="light"> <span data-i18n="settings.themeLight"></span></label>
+      <label class="settings-radio-row"><input type="radio" name="settings-theme-mode" value="dark"> <span data-i18n="settings.themeDark"></span></label>
+    </div>
+    <label class="settings-row"><span data-i18n="settings.paletteLabel"></span>
       <select id="settings-scheme"></select>
     </label>
     <div id="settings-scheme-preview">
       <div class="scheme-preview-row">
-        <span class="hint">Sombre</span>
+        <span class="hint" data-i18n="settings.themeDark"></span>
         <span id="settings-scheme-preview-dark" class="scheme-preview-swatches"></span>
       </div>
       <div class="scheme-preview-row">
-        <span class="hint">Clair</span>
+        <span class="hint" data-i18n="settings.themeLight"></span>
         <span id="settings-scheme-preview-light" class="scheme-preview-swatches"></span>
       </div>
     </div>
-    <button id="settings-edit-theme-btn" class="settings-full-width-btn">Modifier les couleurs</button>
-    <label class="settings-row"><input type="checkbox" id="settings-dark-mode"> <span>Mode sombre</span></label>
+    <button id="settings-edit-theme-btn" class="settings-full-width-btn" data-i18n="settings.editColors"></button>
 
-    <p class="settings-section-title">Fichiers</p>
-    <label class="settings-row"><span>Extensions reconnues</span>
+    <p class="settings-section-title" data-i18n="settings.sectionEditor"></p>
+    <label class="settings-row"><span data-i18n="settings.fontLabel"></span>
+      <select id="settings-editor-font"></select>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.fontSizeLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-font-size-dec" type="button">−</button>
+        <input type="number" id="settings-font-size-value" class="settings-stepper-value" step="1">
+        <button id="settings-font-size-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.marginXLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-margin-x-dec" type="button">−</button>
+        <input type="number" id="settings-margin-x-value" class="settings-stepper-value" step="4">
+        <button id="settings-margin-x-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.marginYLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-margin-y-dec" type="button">−</button>
+        <input type="number" id="settings-margin-y-value" class="settings-stepper-value" step="4">
+        <button id="settings-margin-y-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.lineSpacingLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-line-spacing-dec" type="button">−</button>
+        <input type="number" id="settings-line-spacing-value" class="settings-stepper-value" step="0.1">
+        <button id="settings-line-spacing-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.autosaveLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.autosaveDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-autosave"><span class="switch-track"></span></span>
+    </label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.tocSidebarLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.tocSidebarDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-toc-sidebar"><span class="switch-track"></span></span>
+    </label>
+
+    <p class="settings-section-title" data-i18n="settings.sectionLanguage"></p>
+    <div class="settings-radio-group" id="settings-language">
+      <label class="settings-radio-row"><input type="radio" name="settings-language" value="system"> <span data-i18n="common.system"></span></label>
+      <!-- "Français"/"English" volontairement non traduits : dans un
+           sélecteur de langue, chaque option s'affiche dans sa propre
+           langue (même convention qu'Android's AppLanguage.nativeLabel). -->
+      <label class="settings-radio-row"><input type="radio" name="settings-language" value="fr"> <span>Français</span></label>
+      <label class="settings-radio-row"><input type="radio" name="settings-language" value="en"> <span>English</span></label>
+    </div>
+
+    <p class="settings-section-title" data-i18n="settings.sectionFiles"></p>
+    <label class="settings-row"><span data-i18n="settings.extensionsLabel"></span>
       <input type="text" id="settings-extensions-input" autocomplete="off">
     </label>
-    <label class="settings-row"><input type="checkbox" id="settings-extensions-all"> <span>Tous les fichiers (ignorer le filtre)</span></label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.extensionsAllLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.extensionsAllDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-extensions-all"><span class="switch-track"></span></span>
+    </label>
 
-    <p class="settings-section-title">Zettelkasten</p>
-    <label class="settings-row"><span>Motif de détection d'ID (regex)</span>
+    <p class="settings-section-title" data-i18n="settings.sectionZettelkasten"></p>
+    <label class="settings-row"><span data-i18n="settings.idPatternLabel"></span>
       <input type="text" id="settings-id-pattern" autocomplete="off">
     </label>
-    <label class="settings-row"><span>Format de génération d'ID</span>
+    <label class="settings-row"><span data-i18n="settings.idFormatLabel"></span>
       <input type="text" id="settings-id-format" autocomplete="off">
     </label>
     <p id="settings-id-preview" class="hint"></p>
@@ -505,9 +727,9 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 <!-- Theme list screen -->
 <div id="theme-list-screen" hidden>
   <div id="theme-list-header">
-    <button id="theme-list-back-btn" title="Retour">←</button>
-    <span>Thèmes</span>
-    <button id="theme-list-new-btn" title="Nouveau thème">+</button>
+    <button id="theme-list-back-btn" data-i18n-title="common.back">←</button>
+    <span data-i18n="themes.listTitle"></span>
+    <button id="theme-list-new-btn" data-i18n-title="themes.newTooltip">+</button>
   </div>
   <div id="theme-list"></div>
 </div>
@@ -515,106 +737,128 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 <!-- Theme editor screen -->
 <div id="theme-editor-screen" hidden>
   <div id="theme-editor-header">
-    <button id="theme-editor-back-btn" title="Annuler">←</button>
+    <button id="theme-editor-back-btn" data-i18n-title="common.cancel">←</button>
     <span id="theme-editor-title"></span>
   </div>
   <div id="theme-editor-body">
-    <label class="settings-row"><span>Nom</span>
+    <label class="settings-row"><span data-i18n="themes.nameLabel"></span>
       <input type="text" id="theme-editor-name" autocomplete="off">
     </label>
     <div id="theme-tabs">
-      <button id="theme-tab-dark" class="active">Sombre</button>
-      <button id="theme-tab-light">Clair</button>
+      <button id="theme-tab-dark" class="active" data-i18n="settings.themeDark"></button>
+      <button id="theme-tab-light" data-i18n="settings.themeLight"></button>
     </div>
     <div id="theme-editor-colors"></div>
   </div>
   <div class="dlg-btn-row">
-    <button id="theme-editor-cancel">Annuler</button>
-    <button id="theme-editor-save">💾 Enregistrer</button>
+    <button id="theme-editor-cancel" data-i18n="common.cancel"></button>
+    <button id="theme-editor-save" class="icon-label-btn"></button>
   </div>
 </div>
 
 <!-- Duplicate theme (name prompt) -->
 <dialog id="theme-dup-dlg">
   <div id="theme-dup-header">
-    <span>Dupliquer le thème</span>
+    <span data-i18n="themes.duplicateTitle"></span>
   </div>
   <div id="theme-dup-body">
     <input type="text" id="theme-dup-name" autocomplete="off">
     <p id="theme-dup-error" class="hint"></p>
   </div>
   <div class="dlg-btn-row">
-    <button id="theme-dup-cancel">Annuler</button>
-    <button id="theme-dup-create">Créer</button>
+    <button id="theme-dup-cancel" data-i18n="common.cancel"></button>
+    <button id="theme-dup-create" data-i18n="common.create"></button>
   </div>
 </dialog>
 
 <!-- File browser screen (active repository) -->
 <div id="browser-screen" hidden>
   <div id="browser-header">
-    <button id="browser-back-btn" title="Dossier parent (ou retour aux dépôts à la racine)">←</button>
+    <button id="browser-back-btn" data-i18n-title="browser.backTooltip">←</button>
     <span id="browser-title"></span>
-    <button id="browser-options-btn" title="Options du dépôt">⋮</button>
-    <button id="browser-repair-btn" title="Réparer les liens Zettelkasten de ce dépôt">🔗</button>
-    <button id="browser-refresh-btn" title="Rafraîchir la liste">⟳</button>
-    <button id="browser-settings-btn" title="Réglages">⚙</button>
+    <button id="browser-options-btn" data-i18n-title="browser.repoOptionsTooltip">⋮</button>
+    <button id="browser-repair-btn" data-i18n-title="browser.repairTooltip" class="icon-btn"></button>
+    <button id="browser-new-btn" data-i18n-title="browser.newNoteTooltip">+</button>
+    <button id="browser-refresh-btn" data-i18n-title="browser.refreshTooltip">⟳</button>
+    <button id="browser-settings-btn" data-i18n-title="common.settings" class="icon-btn"></button>
   </div>
   <div id="browser-search-bar">
     <div id="browser-search-mode">
-      <button data-mode="name" class="active">Nom</button>
-      <button data-mode="content">Contenu</button>
-      <button data-mode="tag">#Tag</button>
+      <button data-mode="name" class="active" data-i18n="browser.searchName"></button>
+      <button data-mode="content" data-i18n="browser.searchContent"></button>
+      <button data-mode="tag" data-i18n="browser.searchTag"></button>
     </div>
-    <input type="text" id="browser-search-input" placeholder="Rechercher…" autocomplete="off">
-    <button id="browser-sort-btn" title="Trier par nom">🔤</button>
+    <input type="text" id="browser-search-input" data-i18n-placeholder="browser.searchPlaceholderName" autocomplete="off">
+    <button id="browser-tags-btn" data-i18n-title="browser.tagsTooltip" class="icon-btn" hidden></button>
+    <button id="browser-sort-btn" class="icon-btn"></button>
   </div>
-  <p id="browser-empty-hint" class="hint" hidden>
-    Aucun fichier reconnu comme note dans ce dépôt.
-  </p>
+  <p id="browser-empty-hint" class="hint" data-i18n="browser.emptyHintNoFiles" hidden></p>
   <div id="browser-list"></div>
 </div>
 
 <!-- Repository options -->
 <dialog id="repo-options-dlg">
   <div id="repo-options-header">
-    <span>Options du dépôt</span>
-    <button id="repo-options-close" title="Fermer">✕</button>
+    <span data-i18n="browser.repoOptionsTitle"></span>
+    <button id="repo-options-close" data-i18n-title="common.close">✕</button>
   </div>
   <div id="repo-options-body">
-    <label class="settings-row"><input type="checkbox" id="repo-options-include-extension"> <span>Inclure l'extension dans les liens [[…]]</span></label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="browser.includeExtensionLabel"></span>
+        <span class="settings-row-desc" data-i18n="browser.includeExtensionDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="repo-options-include-extension"><span class="switch-track"></span></span>
+    </label>
   </div>
 </dialog>
 
 <!-- Editor screen -->
 <div id="editor-screen" hidden>
   <div id="ed-header">
-    <button id="editor-back-btn" title="Fermer (retour au dépôt)">✕</button>
+    <button id="editor-back-btn" data-i18n-title="editor.closeTooltip">✕</button>
     <span id="editor-title"></span>
     <div id="ed-actions">
-      <button id="editor-toc-btn" title="Table des matières">📑</button>
-      <button id="editor-backlinks-btn" title="Notes qui font un lien vers celle-ci">
-        <span id="editor-backlinks-badge" class="editor-badge" hidden></span>⛓</button>
-      <button id="editor-preview-btn" title="Aperçu">👁</button>
-      <button id="editor-save-btn" title="Enregistrer (Ctrl+S)" disabled>💾</button>
+      <button id="editor-toc-btn" data-i18n-title="editor.tocTooltip" class="icon-btn"></button>
+      <button id="editor-backlinks-btn" data-i18n-title="editor.backlinksTooltip" class="icon-btn">
+        <span id="editor-backlinks-badge" class="editor-badge" hidden></span>
+        <span id="editor-backlinks-icon"></span>
+      </button>
+      <button id="editor-preview-btn" data-i18n-title="editor.previewTooltip" class="icon-btn"></button>
+      <button id="editor-save-btn" data-i18n-title="editor.saveTooltip" class="icon-btn" disabled></button>
       <div id="editor-menu-wrap">
-        <button id="editor-menu-btn" title="Plus d'actions">⋮</button>
+        <button id="editor-menu-btn" data-i18n-title="editor.moreTooltip">⋮</button>
         <div id="editor-menu" hidden>
-          <button id="editor-menu-insert-id">🔢 Insérer un ID Zettelkasten</button>
-          <button id="editor-menu-insert-link">🔗 Insérer un lien</button>
-          <button id="editor-menu-rename">✏️ Renommer</button>
-          <button id="editor-menu-backup-create">🕘 Créer une sauvegarde</button>
-          <button id="editor-menu-backup-restore">♻️ Restaurer une sauvegarde</button>
-          <button id="editor-menu-settings">⚙ Réglages</button>
+          <button id="editor-menu-insert-id" class="icon-label-btn"></button>
+          <button id="editor-menu-insert-link" class="icon-label-btn"></button>
+          <button id="editor-menu-rename" class="icon-label-btn"></button>
+          <button id="editor-menu-backup-create" class="icon-label-btn"></button>
+          <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
+          <button id="editor-menu-settings" class="icon-label-btn"></button>
         </div>
       </div>
     </div>
   </div>
   <div id="ed-body">
-    <div id="ed-wrap">
-      <pre id="ed-highlight" aria-hidden="true"></pre>
-      <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div id="ed-main">
+      <div id="ed-wrap">
+        <pre id="ed-highlight" aria-hidden="true"></pre>
+        <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      </div>
+      <div id="ed-preview" hidden></div>
     </div>
-    <div id="ed-preview" hidden></div>
+    <!-- Panneau TOC latéral (réglage settings.tocSidebarMode) — sur le
+         modèle de writhdeck-web : colonne flex fixe, jamais en surimpression.
+         Reste ouvert après un clic sur un titre ; se referme via le bouton
+         "✕" ou en ré-appuyant sur l'icône TOC de la barre d'outils. -->
+    <div id="toc-panel" hidden>
+      <div id="toc-panel-header">
+        <span data-i18n="editor.tocTooltip"></span>
+        <button id="toc-panel-close-btn" data-i18n-title="common.close" class="icon-btn">✕</button>
+      </div>
+      <p id="toc-panel-empty-hint" class="hint" data-i18n="editor.tocEmptyHint" hidden></p>
+      <div id="toc-panel-list"></div>
+    </div>
   </div>
 </div>
 
@@ -622,65 +866,146 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 <dialog id="close-confirm-dlg">
   <p id="close-confirm-msg"></p>
   <div class="dlg-btn-row">
-    <button id="close-confirm-yes">Enregistrer et fermer</button>
-    <button id="close-confirm-no">Fermer sans enregistrer</button>
-    <button id="close-confirm-cancel">Annuler</button>
+    <button id="close-confirm-yes" data-i18n="editor.saveAndClose"></button>
+    <button id="close-confirm-no" data-i18n="editor.closeWithoutSaving"></button>
+    <button id="close-confirm-cancel" data-i18n="common.cancel"></button>
   </div>
 </dialog>
 
 <!-- Insert-link picker (filterable) -->
 <dialog id="zklink-picker-dlg">
   <div id="zklink-picker-header">
-    <span>Insérer un lien</span>
-    <button id="zklink-picker-close" title="Fermer">✕</button>
+    <span data-i18n="editor.insertLinkTitle"></span>
+    <button id="zklink-picker-close" data-i18n-title="common.close">✕</button>
   </div>
-  <input type="text" id="zklink-filter" placeholder="Filtrer par nom, titre ou ID…" autocomplete="off">
-  <p id="zklink-empty-hint" class="hint" hidden>Aucune note avec un ID Zettelkasten ne correspond.</p>
+  <input type="text" id="zklink-filter" data-i18n-placeholder="editor.linkFilterPlaceholder" autocomplete="off">
+  <p id="zklink-empty-hint" class="hint" data-i18n="editor.linkEmptyHint" hidden></p>
   <div id="zklink-list"></div>
 </dialog>
 
 <!-- Backlinks panel -->
 <dialog id="backlinks-dlg">
   <div id="backlinks-header">
-    <span>Notes qui font un lien vers celle-ci</span>
-    <button id="backlinks-close" title="Fermer">✕</button>
+    <span data-i18n="editor.backlinksTooltip"></span>
+    <button id="backlinks-close" data-i18n-title="common.close">✕</button>
   </div>
-  <p id="backlinks-empty-hint" class="hint" hidden>Aucune note ne référence celle-ci pour l'instant.</p>
+  <p id="backlinks-empty-hint" class="hint" data-i18n="editor.backlinksEmptyHint" hidden></p>
   <div id="backlinks-list"></div>
 </dialog>
 
 <!-- Table of contents -->
 <dialog id="toc-dlg">
   <div id="toc-header">
-    <span>Table des matières</span>
-    <button id="toc-close" title="Fermer">✕</button>
+    <span data-i18n="editor.tocTooltip"></span>
+    <button id="toc-close" data-i18n-title="common.close">✕</button>
   </div>
-  <p id="toc-empty-hint" class="hint" hidden>Aucun titre détecté dans cette note.</p>
+  <p id="toc-empty-hint" class="hint" data-i18n="editor.tocEmptyHint" hidden></p>
   <div id="toc-list"></div>
 </dialog>
 
-<!-- Rename note -->
+<!-- Rename note (editor's own note) -->
 <dialog id="rename-note-dlg">
   <div id="rename-note-header">
-    <span>Renommer</span>
+    <span data-i18n="common.rename"></span>
   </div>
   <div id="rename-note-body">
     <input type="text" id="rename-note-input" autocomplete="off">
   </div>
   <div class="dlg-btn-row">
-    <button id="rename-note-cancel">Annuler</button>
-    <button id="rename-note-confirm">💾 Renommer</button>
+    <button id="rename-note-cancel" data-i18n="common.cancel"></button>
+    <button id="rename-note-confirm" class="icon-label-btn"></button>
   </div>
 </dialog>
 
 <!-- Restore backup -->
 <dialog id="backup-restore-dlg">
   <div id="backup-restore-header">
-    <span>Restaurer une sauvegarde</span>
-    <button id="backup-restore-close" title="Fermer">✕</button>
+    <span data-i18n="editor.backupRestoreTitle"></span>
+    <button id="backup-restore-close" data-i18n-title="common.close">✕</button>
   </div>
-  <p id="backup-restore-empty-hint" class="hint" hidden>Aucune sauvegarde pour cette note.</p>
+  <p id="backup-restore-empty-hint" class="hint" data-i18n="editor.backupEmptyHint" hidden></p>
   <div id="backup-restore-list"></div>
+</dialog>
+
+<!-- Tag browser -->
+<dialog id="tag-browser-dlg">
+  <div id="tag-browser-header">
+    <span data-i18n="browser.tagsDlgTitle"></span>
+    <button id="tag-browser-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <p id="tag-browser-empty-hint" class="hint" data-i18n="browser.tagsEmptyHint" hidden></p>
+  <div id="tag-browser-list"></div>
+</dialog>
+
+<!-- New note -->
+<dialog id="new-note-dlg">
+  <div id="new-note-header">
+    <span data-i18n="browser.newNoteTitle"></span>
+  </div>
+  <div id="new-note-body">
+    <input type="text" id="new-note-input" data-i18n-placeholder="browser.newNoteInputPlaceholder" autocomplete="off">
+  </div>
+  <div class="dlg-btn-row">
+    <button id="new-note-cancel" data-i18n="common.cancel"></button>
+    <button id="new-note-create" data-i18n="common.create"></button>
+  </div>
+</dialog>
+
+<!-- Per-file action menu (long-press equivalent) -->
+<dialog id="note-actions-dlg">
+  <div id="note-actions-header">
+    <span id="note-actions-title"></span>
+    <button id="note-actions-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <div id="note-actions-body">
+    <button id="note-actions-rename" class="icon-label-btn"></button>
+    <button id="note-actions-move" class="icon-label-btn"></button>
+    <button id="note-actions-delete" class="icon-label-btn"></button>
+  </div>
+</dialog>
+
+<!-- Rename note (from the browser, not the editor) -->
+<dialog id="note-rename-dlg">
+  <div id="note-rename-header">
+    <span data-i18n="common.rename"></span>
+  </div>
+  <div id="note-rename-body">
+    <input type="text" id="note-rename-input" autocomplete="off">
+  </div>
+  <div class="dlg-btn-row">
+    <button id="note-rename-cancel" data-i18n="common.cancel"></button>
+    <button id="note-rename-confirm" class="icon-label-btn"></button>
+  </div>
+</dialog>
+
+<!-- Move note: destination repository + subfolder navigation -->
+<dialog id="note-move-dlg">
+  <div id="note-move-header">
+    <span data-i18n="browser.moveTitle"></span>
+    <button id="note-move-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <div id="note-move-body">
+    <p id="note-move-file" class="hint"></p>
+    <label id="note-move-repo-row" class="settings-row" hidden><span data-i18n="browser.moveRepoLabel"></span>
+      <select id="note-move-repo-select"></select>
+    </label>
+    <p id="note-move-breadcrumb"></p>
+    <div id="note-move-list"></div>
+  </div>
+  <div class="dlg-btn-row">
+    <button id="note-move-cancel" data-i18n="common.cancel"></button>
+    <button id="note-move-confirm" data-i18n="browser.moveHereButton"></button>
+  </div>
+</dialog>
+
+<!-- External modification conflict (Écraser / Recharger / Annuler) -->
+<dialog id="external-conflict-dlg">
+  <p id="external-conflict-msg"></p>
+  <div class="dlg-btn-row">
+    <button id="external-conflict-overwrite" data-i18n="editor.conflictOverwrite"></button>
+    <button id="external-conflict-reload" data-i18n="editor.conflictReload"></button>
+    <button id="external-conflict-cancel" data-i18n="common.cancel"></button>
+  </div>
 </dialog>
 
 <script>
@@ -751,6 +1076,470 @@ function getAllSchemeNames() {
 
 
 'use strict';
+// Monochrome inline SVG icons (`fill`/`stroke: currentColor`, follows the
+// button's own text color) — replaces colored emoji glyphs (🔗💾👁✏️🔢🕘♻️
+// ⚙📁🏷 etc.) per explicit user request ("de façon générale ne mets pas
+// d'icone colorée si possible"). Mostly simple Feather-style stroke icons
+// (well-known, simple single/double-path shapes, safe to reproduce exactly)
+// plus two hand-drawn ones (settings gear, hash) where no simple standard
+// icon fit. Where Android reuses the *same* Material icon for two
+// different actions (e.g. `Icons.Filled.Link` for both backlinks and
+// "insert link"), this reuses the same SVG here too.
+const Icons = (() => {
+  const strokeSvg = (paths, size) =>
+    `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" ` +
+    `stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+
+  // Feather "link" — reused for both the backlinks button and "Insérer un
+  // lien", same as Android reusing Icons.Filled.Link for both.
+  const link = (size = 18) => strokeSvg(
+    '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>' +
+    '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>', size);
+
+  // Feather "save" (floppy disk).
+  const save = (size = 18) => strokeSvg(
+    '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>' +
+    '<polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>', size);
+
+  // Feather "eye" / "eye-off" — preview/edit toggle.
+  const eye = (size = 18) => strokeSvg(
+    '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>', size);
+  const eyeOff = (size = 18) => strokeSvg(
+    '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>' +
+    '<line x1="1" y1="1" x2="23" y2="23"/>', size);
+
+  // Feather "edit-2" (plain pencil) — reused for both the preview toggle's
+  // "switch to edit" state and "Renommer", same as Android reusing
+  // Icons.Filled.Edit for both.
+  const edit = (size = 18) => strokeSvg('<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>', size);
+
+  // Hash/number glyph — no simple standard "insert ID" icon exists; a
+  // literal "#" reads reasonably for "insert a generated identifier".
+  const hash = (size = 18) => strokeSvg(
+    '<line x1="5" y1="9" x2="19" y2="9"/><line x1="5" y1="15" x2="19" y2="15"/>' +
+    '<line x1="9" y1="4" x2="7" y2="20"/><line x1="16" y1="4" x2="14" y2="20"/>', size);
+
+  // Feather "clock" — create backup (Android's History icon is a clock
+  // with a back-arrow; a plain clock reads the same at this size).
+  const clock = (size = 18) => strokeSvg(
+    '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>', size);
+
+  // Feather "rotate-ccw" — restore backup.
+  const restore = (size = 18) => strokeSvg(
+    '<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>', size);
+
+  // Feather "tool" (wrench) — repair Zettelkasten links (Android:
+  // Icons.Filled.Build).
+  const wrench = (size = 18) => strokeSvg(
+    '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>', size);
+
+  // Feather "tag".
+  const tag = (size = 18) => strokeSvg(
+    '<path d="M20.59 13.41L13.42 20.58a2 2 0 0 1-2.83 0L2.59 12.59a2 2 0 0 1 0-2.83l7.17-7.17A2 2 0 0 1 12 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-.41 1.41z"/>' +
+    '<circle cx="7.5" cy="7.5" r="1.2" fill="currentColor"/>', size);
+
+  // Simple stacked-triangles "sort" glyph — one icon for the sort toggle
+  // regardless of state, the tooltip text says which order is active.
+  const sort = (size = 18) =>
+    `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor">` +
+    '<polygon points="12,4 16,9 8,9"/><polygon points="12,20 16,15 8,15"/></svg>';
+
+  // Gear/settings — hand-drawn (ring + 8 teeth), no simple standard icon
+  // reused elsewhere in this set fit closely enough to justify borrowing.
+  function gear(size = 18) {
+    let teeth = '';
+    for (let i = 0; i < 8; i++) {
+      teeth += `<rect x="10.7" y="1.2" width="2.6" height="3.6" rx="1" transform="rotate(${i * 45} 12 12)"/>`;
+    }
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor">` +
+      '<circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" stroke-width="2.2"/>' +
+      teeth + '</svg>';
+  }
+
+  // Material "toc" (AutoMirrored.Filled.Toc) — 3 lines + 3 trailing dots,
+  // exact shape requested by the user, already in use in template.html.
+  const toc = (size = 20) =>
+    `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor">` +
+    '<path d="M4,18h9v-2H4V18z M4,13h9v-2H4V13z M4,6v2h9V6H4z M18.5,15c0.83,0,1.5,-0.67,1.5,-1.5S19.33,12,18.5,12' +
+    'S17,12.67,17,13.5S17.67,15,18.5,15z M18.5,20c0.83,0,1.5,-0.67,1.5,-1.5S19.33,17,18.5,17s-1.5,0.67,-1.5,1.5' +
+    'S17.67,20,18.5,20z M18.5,10c0.83,0,1.5,-0.67,1.5,-1.5S19.33,7,18.5,7S17,7.67,17,8.5S17.67,10,18.5,10z"/></svg>';
+
+  // Feather "trash-2" — supprimer une note (Android : Icons.Filled.Delete).
+  const trash = (size = 18) => strokeSvg(
+    '<polyline points="3 6 5 6 21 6"/>' +
+    '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' +
+    '<line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>', size);
+
+  // Feather "folder" — lignes du navigateur de destination dans le
+  // dialogue "Déplacer" (Android : Icons.Filled.Folder).
+  const folder = (size = 18) => strokeSvg(
+    '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>', size);
+
+  return { link, save, eye, eyeOff, edit, hash, clock, restore, wrench, tag, sort, gear, toc, trash, folder };
+})();
+
+
+'use strict';
+// Internationalisation FR/EN (round 9) — port du mécanisme d'Android
+// (`AppLanguage` : Système/Français/English, round 6 zettelium-android),
+// mais l'approche technique diffère forcément : pas de ressources
+// `strings.xml`/recréation d'activité ici, un dictionnaire JS plat +
+// re-balayage du DOM. 'system' résout `navigator.language` (retombe sur le
+// français si ni fr ni en) plutôt que la langue système Android.
+//
+// Convention : chaque texte visible par l'utilisateur passe par une clé
+// `section.nom` ; les valeurs paramétrées utilisent `{nom}` (remplacé par
+// `t(key, {nom: valeur})`). Les noms propres (Zettelium, noms de polices
+// génériques Monospace/Sans-serif/Serif/Cursive, noms de palettes de
+// couleurs comme "solarized"/"nord") ne sont volontairement PAS traduits,
+// même logique qu'Android qui ne traduit pas non plus ces éléments.
+const I18n = (() => {
+  const STRINGS = {
+    fr: {
+      'common.back': 'Retour',
+      'common.cancel': 'Annuler',
+      'common.close': 'Fermer',
+      'common.create': 'Créer',
+      'common.rename': 'Renommer',
+      'common.delete': 'Supprimer',
+      'common.save': 'Enregistrer',
+      'common.settings': 'Réglages',
+      'common.system': 'Système',
+      'common.renameFailed': 'Échec du renommage : {error}',
+
+      'repo.addButton': '+ Dépôt',
+      'repo.addTooltip': 'Ajouter un dépôt (dossier)',
+      'repo.emptyHint': 'Aucun dépôt enregistré. Un dossier est un dossier réel sur votre disque — cliquez sur « + Dépôt » pour en choisir un.',
+      'repo.reauthorizeButton': 'Ré-autoriser',
+      'repo.reauthorizeTooltip': 'La permission d\'accès à ce dossier a expiré ou a été révoquée',
+      'repo.moveUpTooltip': 'Monter',
+      'repo.moveDownTooltip': 'Descendre',
+      'repo.removeTooltip': 'Retirer ce dépôt (le dossier réel n\'est pas supprimé)',
+      'repo.removeConfirm': 'Retirer le dépôt "{name}" ? Le dossier lui-même n\'est pas supprimé.',
+      'repo.permissionDenied': 'Permission refusée — le dépôt reste inaccessible.',
+      'repo.fsaUnsupported': 'La File System Access API n\'est pas disponible dans ce navigateur — utilisez Chrome, Edge ou Brave.',
+      'repo.fsaUnsupportedHint': 'La File System Access API n\'est pas disponible dans ce navigateur — utilisez Chrome, Edge ou Brave pour gérer des dépôts.',
+      'repo.alreadyRegistered': 'Ce dossier est déjà enregistré comme dépôt.',
+      'repo.restoreConfigFound': 'Un fichier de configuration Zettelium a été trouvé dans ce dossier.\nRestaurer les réglages ?',
+      'repo.restoreConfigKnownHint': '\n\nDépôts connus (à ré-ajouter manuellement, un par un, via « + Dépôt ») : {names}',
+
+      'settings.screenTitle': 'Réglages',
+      'settings.sectionTheme': 'Thème',
+      'settings.sectionEditor': 'Éditeur',
+      'settings.sectionLanguage': 'Langue',
+      'settings.sectionFiles': 'Fichiers',
+      'settings.sectionZettelkasten': 'Zettelkasten',
+      'settings.themeLight': 'Clair',
+      'settings.themeDark': 'Sombre',
+      'settings.paletteLabel': 'Palette de couleurs',
+      'settings.editColors': 'Modifier les couleurs',
+      'settings.fontLabel': 'Police',
+      'settings.fontSizeLabel': 'Taille de police',
+      'settings.marginXLabel': 'Marge horizontale',
+      'settings.marginYLabel': 'Marge verticale',
+      'settings.lineSpacingLabel': 'Interligne',
+      'settings.extensionsLabel': 'Extensions reconnues',
+      'settings.extensionsAllLabel': 'Tous les fichiers (ignorer le filtre)',
+      'settings.extensionsAllDesc': 'Affiche tous les fichiers des dépôts, quelle que soit leur extension, et ignore la liste ci-dessus.',
+      'settings.autosaveLabel': 'Sauvegarde automatique',
+      'settings.autosaveDesc': 'Enregistre la note en cours d\'édition après quelques secondes d\'inactivité.',
+      'settings.idPatternLabel': 'Motif de détection d\'ID (regex)',
+      'settings.idFormatLabel': 'Format de génération d\'ID',
+      'settings.idPreviewMatch': 'Exemple d\'ID généré : {id} (reconnu par le motif de détection)',
+      'settings.idPreviewMismatch': 'Exemple d\'ID généré : {id} (⚠ NON reconnu par le motif de détection actuel)',
+
+      'themes.listTitle': 'Thèmes',
+      'themes.newTooltip': 'Nouveau thème',
+      'themes.nameLabel': 'Nom',
+      'themes.duplicateTitle': 'Dupliquer le thème',
+      'themes.duplicateTooltip': 'Dupliquer',
+      'themes.editTooltip': 'Modifier',
+      'themes.deleteTooltip': 'Supprimer',
+      'themes.deleteConfirm': 'Supprimer le thème "{name}" ?',
+      'themes.nameEmptyError': 'Le nom ne peut pas être vide.',
+      'themes.nameTakenError': 'Un thème "{name}" existe déjà.',
+      'themes.editTitle': 'Modifier "{name}"',
+      'themes.newTitle': 'Nouveau thème',
+      'themes.colorBg': 'Fond',
+      'themes.colorFg': 'Texte',
+      'themes.colorBgSel': 'Sélection',
+      'themes.colorHeading': 'Titre',
+      'themes.colorComment': 'Commentaire',
+      'themes.colorMarkup': 'Balisage',
+
+      'browser.backTooltip': 'Dossier parent (ou retour aux dépôts à la racine)',
+      'browser.repoOptionsTooltip': 'Options du dépôt',
+      'browser.repoOptionsTitle': 'Options du dépôt',
+      'browser.repairTooltip': 'Réparer les liens Zettelkasten de ce dépôt',
+      'browser.newNoteTooltip': 'Nouvelle note dans ce dossier',
+      'browser.refreshTooltip': 'Rafraîchir la liste',
+      'browser.searchName': 'Nom',
+      'browser.searchContent': 'Contenu',
+      'browser.searchTag': '#Tag',
+      'browser.searchPlaceholderName': 'Rechercher par nom…',
+      'browser.searchPlaceholderContent': 'Rechercher dans le contenu…',
+      'browser.searchPlaceholderTag': 'Rechercher un tag…',
+      'browser.tagsTooltip': 'Parcourir les tags',
+      'browser.sortByNameTooltip': 'Trier par nom (actuellement : dernière modification)',
+      'browser.sortByModifiedTooltip': 'Trier par dernière modification (actuellement : nom)',
+      'browser.emptyHintNoFiles': 'Aucun fichier reconnu comme note dans ce dépôt.',
+      'browser.emptyHintNoFolder': 'Aucun fichier ni sous-dossier ici.',
+      'browser.emptyHintNoResults': 'Aucun résultat.',
+      'browser.includeExtensionLabel': 'Inclure l\'extension dans les liens',
+      'browser.includeExtensionDesc': 'Certains outils Zettelkasten (QOwnNotes, Zettelnotes) attendent des liens sans extension de fichier.',
+      'browser.actionsTooltip': 'Actions (renommer, déplacer, supprimer)',
+      'browser.deleteConfirm': 'Supprimer "{name}" ? Cette action est irréversible.',
+      'browser.deleteFailed': 'Échec de la suppression : {error}',
+      'browser.moveTitle': 'Déplacer',
+      'browser.moveFailed': 'Échec du déplacement : {error}',
+      'browser.moveWriteFailed': 'Échec du déplacement (écriture de la destination) : {error}',
+      'browser.movePartialFailure': 'La note a été copiée vers la destination, mais la suppression de l\'original a échoué : {error}\nLa note existe maintenant en double.',
+      'browser.moveRepoLabel': 'Dépôt',
+      'browser.moveHereButton': 'Déplacer ici',
+      'browser.moveNoSubfolderHint': 'Aucun sous-dossier ici.',
+      'browser.moveNoteFileLabel': 'Note : {name}',
+      'browser.newNoteTitle': 'Nouvelle note',
+      'browser.newNoteInputPlaceholder': 'Nom du fichier',
+      'browser.newNoteAlreadyExists': '"{name}" existe déjà dans ce dossier.',
+      'browser.newNoteFailed': 'Échec de la création : {error}',
+      'browser.repairDone': '{count} note(s) mise(s) à jour.',
+      'browser.repairNothing': 'Aucun lien à réparer.',
+      'browser.tagsDlgTitle': 'Tags',
+      'browser.tagsEmptyHint': 'Aucun tag dans ce dépôt.',
+
+      'editor.closeTooltip': 'Fermer (retour au dépôt)',
+      'editor.tocTooltip': 'Table des matières',
+      'editor.backlinksTooltip': 'Notes qui font un lien vers celle-ci',
+      'editor.previewTooltip': 'Aperçu',
+      'editor.editTooltip': 'Édition',
+      'editor.saveTooltip': 'Enregistrer (Ctrl+S)',
+      'editor.moreTooltip': 'Plus d\'actions',
+      'editor.insertId': 'Insérer un ID Zettelkasten',
+      'editor.insertLink': 'Insérer un lien',
+      'editor.createBackup': 'Créer une sauvegarde',
+      'editor.restoreBackup': 'Restaurer une sauvegarde',
+      'editor.openFailed': 'Impossible d\'ouvrir "{name}" : {error}',
+      'editor.saveFailed': 'Échec de l\'enregistrement : {error}',
+      'editor.saveConfirmMsg': 'Enregistrer les modifications de "{name}" avant de fermer ?',
+      'editor.saveAndClose': 'Enregistrer et fermer',
+      'editor.closeWithoutSaving': 'Fermer sans enregistrer',
+      'editor.insertLinkTitle': 'Insérer un lien',
+      'editor.linkFilterPlaceholder': 'Filtrer par nom, titre ou ID…',
+      'editor.linkEmptyHint': 'Aucune note avec un ID Zettelkasten ne correspond.',
+      'editor.backlinksEmptyHint': 'Aucune note ne référence celle-ci pour l\'instant.',
+      'editor.tocEmptyHint': 'Aucun titre détecté dans cette note.',
+      'editor.tocUntitled': '(sans titre)',
+      'editor.backupCreated': 'Sauvegarde créée : {name}',
+      'editor.backupFailed': 'Échec de la sauvegarde.',
+      'editor.backupRestoreTitle': 'Restaurer une sauvegarde',
+      'editor.backupEmptyHint': 'Aucune sauvegarde pour cette note.',
+      'editor.conflictMsg': 'Le fichier "{name}" a été modifié en dehors de Zettelium depuis son ouverture.',
+      'editor.conflictOverwrite': 'Écraser avec mes modifications',
+      'editor.conflictReload': 'Recharger',
+      'settings.tocSidebarLabel': 'Table des matières en panneau latéral',
+      'settings.tocSidebarDesc': 'Affiche la table des matières dans un panneau à droite de l\'éditeur plutôt que dans une fenêtre temporaire.',
+    },
+    en: {
+      'common.back': 'Back',
+      'common.cancel': 'Cancel',
+      'common.close': 'Close',
+      'common.create': 'Create',
+      'common.rename': 'Rename',
+      'common.delete': 'Delete',
+      'common.save': 'Save',
+      'common.settings': 'Settings',
+      'common.system': 'System',
+      'common.renameFailed': 'Rename failed: {error}',
+
+      'repo.addButton': '+ Repository',
+      'repo.addTooltip': 'Add a repository (folder)',
+      'repo.emptyHint': 'No repository registered. A repository is a real folder on your disk — click "+ Repository" to choose one.',
+      'repo.reauthorizeButton': 'Reauthorize',
+      'repo.reauthorizeTooltip': 'Access permission for this folder has expired or been revoked',
+      'repo.moveUpTooltip': 'Move up',
+      'repo.moveDownTooltip': 'Move down',
+      'repo.removeTooltip': 'Remove this repository (the real folder is not deleted)',
+      'repo.removeConfirm': 'Remove repository "{name}"? The folder itself is not deleted.',
+      'repo.permissionDenied': 'Permission denied — the repository remains inaccessible.',
+      'repo.fsaUnsupported': 'The File System Access API is not available in this browser — use Chrome, Edge, or Brave.',
+      'repo.fsaUnsupportedHint': 'The File System Access API is not available in this browser — use Chrome, Edge, or Brave to manage repositories.',
+      'repo.alreadyRegistered': 'This folder is already registered as a repository.',
+      'repo.restoreConfigFound': 'A Zettelium configuration file was found in this folder.\nRestore the settings?',
+      'repo.restoreConfigKnownHint': '\n\nKnown repositories (re-add manually, one by one, via "+ Repository"): {names}',
+
+      'settings.screenTitle': 'Settings',
+      'settings.sectionTheme': 'Theme',
+      'settings.sectionEditor': 'Editor',
+      'settings.sectionLanguage': 'Language',
+      'settings.sectionFiles': 'Files',
+      'settings.sectionZettelkasten': 'Zettelkasten',
+      'settings.themeLight': 'Light',
+      'settings.themeDark': 'Dark',
+      'settings.paletteLabel': 'Color palette',
+      'settings.editColors': 'Edit colors',
+      'settings.fontLabel': 'Font',
+      'settings.fontSizeLabel': 'Font size',
+      'settings.marginXLabel': 'Horizontal margin',
+      'settings.marginYLabel': 'Vertical margin',
+      'settings.lineSpacingLabel': 'Line spacing',
+      'settings.extensionsLabel': 'Recognized extensions',
+      'settings.extensionsAllLabel': 'All files (ignore filter)',
+      'settings.extensionsAllDesc': 'Shows every file in each repository regardless of extension, and ignores the list above.',
+      'settings.autosaveLabel': 'Autosave',
+      'settings.autosaveDesc': 'Saves the note being edited after a few seconds of inactivity.',
+      'settings.idPatternLabel': 'ID detection pattern (regex)',
+      'settings.idFormatLabel': 'ID generation format',
+      'settings.idPreviewMatch': 'Generated ID example: {id} (recognized by the detection pattern)',
+      'settings.idPreviewMismatch': 'Generated ID example: {id} (⚠ NOT recognized by the current detection pattern)',
+
+      'themes.listTitle': 'Themes',
+      'themes.newTooltip': 'New theme',
+      'themes.nameLabel': 'Name',
+      'themes.duplicateTitle': 'Duplicate theme',
+      'themes.duplicateTooltip': 'Duplicate',
+      'themes.editTooltip': 'Edit',
+      'themes.deleteTooltip': 'Delete',
+      'themes.deleteConfirm': 'Delete theme "{name}"?',
+      'themes.nameEmptyError': 'Name cannot be empty.',
+      'themes.nameTakenError': 'A theme named "{name}" already exists.',
+      'themes.editTitle': 'Edit "{name}"',
+      'themes.newTitle': 'New theme',
+      'themes.colorBg': 'Background',
+      'themes.colorFg': 'Text',
+      'themes.colorBgSel': 'Selection',
+      'themes.colorHeading': 'Heading',
+      'themes.colorComment': 'Comment',
+      'themes.colorMarkup': 'Markup',
+
+      'browser.backTooltip': 'Parent folder (or back to repositories at the root)',
+      'browser.repoOptionsTooltip': 'Repository options',
+      'browser.repoOptionsTitle': 'Repository options',
+      'browser.repairTooltip': 'Repair this repository\'s Zettelkasten links',
+      'browser.newNoteTooltip': 'New note in this folder',
+      'browser.refreshTooltip': 'Refresh the list',
+      'browser.searchName': 'Name',
+      'browser.searchContent': 'Content',
+      'browser.searchTag': '#Tag',
+      'browser.searchPlaceholderName': 'Search by name…',
+      'browser.searchPlaceholderContent': 'Search in content…',
+      'browser.searchPlaceholderTag': 'Search a tag…',
+      'browser.tagsTooltip': 'Browse tags',
+      'browser.sortByNameTooltip': 'Sort by name (currently: last modified)',
+      'browser.sortByModifiedTooltip': 'Sort by last modified (currently: name)',
+      'browser.emptyHintNoFiles': 'No file recognized as a note in this repository.',
+      'browser.emptyHintNoFolder': 'No file or subfolder here.',
+      'browser.emptyHintNoResults': 'No results.',
+      'browser.includeExtensionLabel': 'Include file extension in links',
+      'browser.includeExtensionDesc': 'Some Zettelkasten tools (QOwnNotes, Zettelnotes) expect links without a file extension.',
+      'browser.actionsTooltip': 'Actions (rename, move, delete)',
+      'browser.deleteConfirm': 'Delete "{name}"? This action is irreversible.',
+      'browser.deleteFailed': 'Deletion failed: {error}',
+      'browser.moveTitle': 'Move',
+      'browser.moveFailed': 'Move failed: {error}',
+      'browser.moveWriteFailed': 'Move failed (writing to destination): {error}',
+      'browser.movePartialFailure': 'The note was copied to the destination, but deleting the original failed: {error}\nThe note now exists twice.',
+      'browser.moveRepoLabel': 'Repository',
+      'browser.moveHereButton': 'Move here',
+      'browser.moveNoSubfolderHint': 'No subfolder here.',
+      'browser.moveNoteFileLabel': 'Note: {name}',
+      'browser.newNoteTitle': 'New note',
+      'browser.newNoteInputPlaceholder': 'File name',
+      'browser.newNoteAlreadyExists': '"{name}" already exists in this folder.',
+      'browser.newNoteFailed': 'Creation failed: {error}',
+      'browser.repairDone': '{count} note(s) updated.',
+      'browser.repairNothing': 'No links to repair.',
+      'browser.tagsDlgTitle': 'Tags',
+      'browser.tagsEmptyHint': 'No tag in this repository.',
+
+      'editor.closeTooltip': 'Close (back to repository)',
+      'editor.tocTooltip': 'Table of contents',
+      'editor.backlinksTooltip': 'Notes linking to this one',
+      'editor.previewTooltip': 'Preview',
+      'editor.editTooltip': 'Edit',
+      'editor.saveTooltip': 'Save (Ctrl+S)',
+      'editor.moreTooltip': 'More actions',
+      'editor.insertId': 'Insert a Zettelkasten ID',
+      'editor.insertLink': 'Insert a link',
+      'editor.createBackup': 'Create a backup',
+      'editor.restoreBackup': 'Restore a backup',
+      'editor.openFailed': 'Could not open "{name}": {error}',
+      'editor.saveFailed': 'Save failed: {error}',
+      'editor.saveConfirmMsg': 'Save changes to "{name}" before closing?',
+      'editor.saveAndClose': 'Save and close',
+      'editor.closeWithoutSaving': 'Close without saving',
+      'editor.insertLinkTitle': 'Insert a link',
+      'editor.linkFilterPlaceholder': 'Filter by name, title, or ID…',
+      'editor.linkEmptyHint': 'No note with a Zettelkasten ID matches.',
+      'editor.backlinksEmptyHint': 'No note references this one yet.',
+      'editor.tocEmptyHint': 'No heading detected in this note.',
+      'editor.tocUntitled': '(untitled)',
+      'editor.backupCreated': 'Backup created: {name}',
+      'editor.backupFailed': 'Backup failed.',
+      'editor.backupRestoreTitle': 'Restore a backup',
+      'editor.backupEmptyHint': 'No backup for this note.',
+      'editor.conflictMsg': 'The file "{name}" was modified outside Zettelium since it was opened.',
+      'editor.conflictOverwrite': 'Overwrite with my changes',
+      'editor.conflictReload': 'Reload',
+      'settings.tocSidebarLabel': 'Table of contents as a side panel',
+      'settings.tocSidebarDesc': 'Shows the table of contents in a panel to the right of the editor instead of a temporary window.',
+    },
+  };
+
+  // 'system' résout `navigator.language` — retombe sur le français si ni
+  // anglais ni français (l'app n'a que ces deux traductions, comme
+  // l'énumération volontairement ouverte d'Android le permettrait pour de
+  // futures langues, mais seules FR/EN existent ici pour l'instant).
+  function effectiveLanguage() {
+    const lang = State.settings.language;
+    if (lang === 'fr' || lang === 'en') return lang;
+    const nav = (navigator.language || 'fr').toLowerCase();
+    return nav.startsWith('en') ? 'en' : 'fr';
+  }
+
+  function t(key, params) {
+    const dict = STRINGS[effectiveLanguage()] || STRINGS.fr;
+    let str = dict[key] !== undefined ? dict[key] : (STRINGS.fr[key] !== undefined ? STRINGS.fr[key] : key);
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        str = str.split(`{${k}}`).join(v);
+      }
+    }
+    return str;
+  }
+
+  // Locale pour le formatage des dates (`Date.toLocaleString`) — suit la
+  // langue choisie dans l'app, pas seulement la langue système, même esprit
+  // qu'Android (changer la langue in-app change aussi le format de date).
+  function locale() {
+    return effectiveLanguage() === 'en' ? 'en-US' : 'fr-FR';
+  }
+
+  // Balaie le DOM statique (`template.html`) : `data-i18n` (textContent),
+  // `data-i18n-title` (attribut title), `data-i18n-placeholder` (attribut
+  // placeholder). Le contenu généré dynamiquement par chaque module
+  // (browser.js/editor.js/...) n'est PAS couvert ici — chaque module
+  // écoute l'évènement `i18n:apply` pour se rafraîchir lui-même (labels
+  // construits avec une icône, listes actuellement affichées, etc.), un
+  // couplage plus léger qu'un sweep DOM générique pour ce contenu-là.
+  function apply() {
+    for (const elx of document.querySelectorAll('[data-i18n]')) {
+      elx.textContent = t(elx.dataset.i18n);
+    }
+    for (const elx of document.querySelectorAll('[data-i18n-title]')) {
+      elx.title = t(elx.dataset.i18nTitle);
+    }
+    for (const elx of document.querySelectorAll('[data-i18n-placeholder]')) {
+      elx.placeholder = t(elx.dataset.i18nPlaceholder);
+    }
+    document.documentElement.lang = effectiveLanguage();
+    document.dispatchEvent(new CustomEvent('i18n:apply'));
+  }
+
+  return { t, apply, effectiveLanguage, locale };
+})();
+
+
+'use strict';
 // IndexedDB wrapper — promise-based, adapted from writhdeck-web/src/db.js.
 //
 // Unlike writhdeck-web's flat `documents` store, zettelium-web has no
@@ -761,7 +1550,7 @@ function getAllSchemeNames() {
 // IndexedDB round-trip) and global app settings/meta.
 const Storage = (() => {
   const DB_NAME = 'zettelium';
-  const DB_VER  = 1;
+  const DB_VER  = 2;
   let _db = null;
 
   function open() {
@@ -775,6 +1564,13 @@ const Storage = (() => {
         }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta', { keyPath: 'key' });
+        }
+        // Curseur par note (offset de caractère), clé = `${repositoryId}::${path}`
+        // — équivalent de NoteCursorStore.kt (Android round 11 : offset de
+        // caractère, pas ligne/colonne, la contrainte ligne/colonne d'un
+        // moteur Tcl ne s'applique pas ici non plus qu'à zettelium-android).
+        if (!db.objectStoreNames.contains('cursors')) {
+          db.createObjectStore('cursors', { keyPath: 'key' });
         }
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
@@ -809,7 +1605,14 @@ const Storage = (() => {
     return tx('meta', 'readwrite', s => s.put({ key, value }));
   }
 
-  return { getAllRepositories, putRepository, deleteRepository, getMeta, setMeta };
+  function getCursor(key) {
+    return tx('cursors', 'readonly', s => s.get(key)).then(r => r ? r.offset : undefined);
+  }
+  function setCursor(key, offset) {
+    return tx('cursors', 'readwrite', s => s.put({ key, offset }));
+  }
+
+  return { getAllRepositories, putRepository, deleteRepository, getMeta, setMeta, getCursor, setCursor };
 })();
 
 
@@ -948,10 +1751,41 @@ const FSA = (() => {
     return newHandle;
   }
 
+  // Writes `content` into a brand new file named `name` inside `dirHandle`
+  // (creates it). Used both by note creation and by "move" (write to
+  // destination before deleting the source, mirroring Android's
+  // copy-then-delete `moveNote` — never `DocumentsContract.moveDocument`,
+  // not reliably supported across two independent SAF trees there, and
+  // FSA has no equivalent cross-handle move either).
+  async function writeNewFile(dirHandle, name, content) {
+    const handle = await dirHandle.getFileHandle(name, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    return handle;
+  }
+
+  // Creates an empty note file, appending the first configured extension if
+  // `name` doesn't already end in a recognised one — same rule as Android's
+  // `SafRepositoryAccess.createNoteFile`/`renameNoteFile` ("conserve
+  // l'extension de note si le nouveau nom n'en porte pas déjà une reconnue").
+  // Returns `{handle, name}` since the final name can differ from the input.
+  async function createNoteFile(dirHandle, name, extensions) {
+    const hasRecognisedExt = extensions.some(ext => name.toLowerCase().endsWith(ext));
+    const finalName = hasRecognisedExt ? name : name + (extensions[0] || '');
+    const handle = await dirHandle.getFileHandle(finalName, { create: true });
+    return { handle, name: finalName };
+  }
+
+  async function deleteFile(dirHandle, name) {
+    await dirHandle.removeEntry(name);
+  }
+
   return {
     supported, pickDirectory, queryPermission, requestPermission,
     isNoteFileName, listChildren, listNoteFilesRecursive, readFileText,
-    getParentDirHandle, renameFile, BACKUPS_DIR_NAME
+    getParentDirHandle, renameFile, writeNewFile, createNoteFile, deleteFile,
+    BACKUPS_DIR_NAME
   };
 })();
 
@@ -1871,7 +2705,15 @@ const INI = (() => {
     id_pattern:                      ['idPattern', 'str'],
     id_generation_format:            ['idGenerationFormat', 'str'],
     scheme:                          ['scheme', 'str'],
-    dark_mode:                       ['darkMode', 'bool'],
+    theme_mode:                      ['themeMode', 'str'],
+    language:                        ['language', 'str'],
+    editor_font_family:              ['editorFontFamily', 'str'],
+    editor_font_size:                ['editorFontSize', 'int'],
+    editor_margin_x:                 ['editorMarginX', 'int'],
+    editor_margin_y:                 ['editorMarginY', 'int'],
+    editor_line_spacing:             ['editorLineSpacing', 'float'],
+    autosave_enabled:                ['autosaveEnabled', 'bool'],
+    toc_sidebar_mode:                ['tocSidebarMode', 'bool'],
   };
   const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, [jsKey]]) => [jsKey, k]));
 
@@ -1910,7 +2752,10 @@ const INI = (() => {
       const mapping = KEY_MAP[key];
       if (!mapping) continue;
       const [jsKey, type] = mapping;
-      settings[jsKey] = type === 'bool' ? parseBool(val) : val;
+      if (type === 'bool') settings[jsKey] = parseBool(val);
+      else if (type === 'int') settings[jsKey] = parseInt(val, 10);
+      else if (type === 'float') settings[jsKey] = parseFloat(val);
+      else settings[jsKey] = val;
     }
     return { settings, knownRepositories };
   }
@@ -1966,10 +2811,48 @@ const State = {
     // and persistence as AppSettings.noteSortOrder (Android round 3).
     noteSortOrder: 'name',
 
-    // Theme (phase 6) — scheme name from schemes.js (SCHEMES/customSchemes)
-    // + dark/light, applied via applyTheme() in app.js.
+    // Theme (phase 6/9) — scheme name from schemes.js (SCHEMES/customSchemes)
+    // + a tri-state mode ('system'|'light'|'dark', matching Android's
+    // `ThemeMode` enum — round 9 unification, replaces the earlier plain
+    // boolean `darkMode`), applied via applyTheme() in app.js.
     scheme: 'default',
-    darkMode: true
+    themeMode: 'system',
+
+    // Langue de l'interface ('system'|'fr'|'en') — round 9, port de
+    // `AppLanguage` (Android round 6). Appliquée par `I18n.apply()`
+    // (i18n.js) ; 'system' résout la langue du navigateur au démarrage et à
+    // chaque changement (`navigator.language`), retombant sur le français
+    // si la langue système n'est pas supportée.
+    language: 'system',
+
+    // Editor typography (phase 6, "sur le modèle de zettelium-android" —
+    // SettingsScreen.kt's "Éditeur" section: font family/size, margins,
+    // line spacing). Applied via applyEditorTypography() in app.js. Font
+    // family values are real CSS stacks (see settings.js's EDITOR_FONTS) —
+    // Android's own list is generic *Android* type-face aliases
+    // ("sans-serif-condensed" etc.), which don't mean anything in CSS, so
+    // adapted rather than copied verbatim.
+    editorFontFamily: 'monospace',
+    editorFontSize: 16,
+    editorMarginX: 40,
+    editorMarginY: 24,
+    editorLineSpacing: 1.5,
+
+    // Sauvegarde automatique (round 10) — porté d'`AppSettings
+    // .autosaveEnabled` : désactivée par défaut ("cela sauvegarde
+    // régulièrement... n'est pas souhaité", décision explicite Android
+    // round 3), reste un réglage disponible pour qui la veut. Voir
+    // editor.js `scheduleAutosave()` pour le mécanisme (debounce 2s, même
+    // durée qu'Android).
+    autosaveEnabled: false,
+
+    // Table des matières en panneau latéral (round 11), sur le modèle de
+    // writhdeck-web (`toc.js`) — désactivé par défaut, conserve le
+    // comportement historique (fenêtre modale `<dialog>`) tant qu'on ne
+    // l'active pas explicitement. Le panneau reste ouvert après un clic
+    // sur un titre (persistant), jusqu'à fermeture explicite (round 12 :
+    // le mode "épingle" a été retiré, jugé redondant avec le bouton "✕").
+    tocSidebarMode: false
   }
 };
 
@@ -2036,11 +2919,9 @@ async function maybeRestoreDurableConfig(repo) {
   if (!Object.keys(settings).length) return;
 
   const knownHint = knownRepositories.length
-    ? `\n\nDépôts connus (à ré-ajouter manuellement, un par un, via « + Dépôt ») : ${knownRepositories.join(', ')}`
+    ? I18n.t('repo.restoreConfigKnownHint', { names: knownRepositories.join(', ') })
     : '';
-  const restore = confirm(
-    `Un fichier de configuration Zettelium a été trouvé dans ce dossier.\n` +
-    `Restaurer les réglages ?${knownHint}`);
+  const restore = confirm(I18n.t('repo.restoreConfigFound') + knownHint);
   if (!restore) return;
 
   Object.assign(State.settings, settings);
@@ -2051,7 +2932,15 @@ async function maybeRestoreDurableConfig(repo) {
     setIdPattern(State.settings.idPattern),
     setIdGenerationFormat(State.settings.idGenerationFormat),
     setScheme(State.settings.scheme),
-    setDarkMode(State.settings.darkMode)
+    setThemeMode(State.settings.themeMode),
+    setLanguage(State.settings.language),
+    setEditorFontFamily(State.settings.editorFontFamily),
+    setEditorFontSize(State.settings.editorFontSize),
+    setEditorMarginX(State.settings.editorMarginX),
+    setEditorMarginY(State.settings.editorMarginY),
+    setEditorLineSpacing(State.settings.editorLineSpacing),
+    setAutosaveEnabled(State.settings.autosaveEnabled),
+    setTocSidebarMode(State.settings.tocSidebarMode)
   ]);
 }
 
@@ -2071,7 +2960,9 @@ function activeRepository() {
 }
 
 async function loadState() {
-  const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, darkMode] = await Promise.all([
+  const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, themeMode,
+    language, editorFontFamily, editorFontSize, editorMarginX, editorMarginY, editorLineSpacing, autosaveEnabled,
+    tocSidebarMode] = await Promise.all([
     Storage.getAllRepositories(),
     Storage.getMeta('noteExtensions'),
     Storage.getMeta('noteExtensionsFilterDisabled'),
@@ -2079,7 +2970,15 @@ async function loadState() {
     Storage.getMeta('idGenerationFormat'),
     Storage.getMeta('noteSortOrder'),
     Storage.getMeta('scheme'),
-    Storage.getMeta('darkMode')
+    Storage.getMeta('themeMode'),
+    Storage.getMeta('language'),
+    Storage.getMeta('editorFontFamily'),
+    Storage.getMeta('editorFontSize'),
+    Storage.getMeta('editorMarginX'),
+    Storage.getMeta('editorMarginY'),
+    Storage.getMeta('editorLineSpacing'),
+    Storage.getMeta('autosaveEnabled'),
+    Storage.getMeta('tocSidebarMode')
   ]);
   State.repositories = (repos || []).sort((a, b) => a.order - b.order);
   if (noteExtensions !== undefined) State.settings.noteExtensions = noteExtensions;
@@ -2091,7 +2990,15 @@ async function loadState() {
   if (idGenerationFormat !== undefined) State.settings.idGenerationFormat = idGenerationFormat.trim();
   if (noteSortOrder !== undefined) State.settings.noteSortOrder = noteSortOrder;
   if (scheme !== undefined) State.settings.scheme = scheme;
-  if (darkMode !== undefined) State.settings.darkMode = darkMode;
+  if (themeMode !== undefined) State.settings.themeMode = themeMode;
+  if (language !== undefined) State.settings.language = language;
+  if (editorFontFamily !== undefined) State.settings.editorFontFamily = editorFontFamily;
+  if (editorFontSize !== undefined) State.settings.editorFontSize = editorFontSize;
+  if (editorMarginX !== undefined) State.settings.editorMarginX = editorMarginX;
+  if (editorMarginY !== undefined) State.settings.editorMarginY = editorMarginY;
+  if (editorLineSpacing !== undefined) State.settings.editorLineSpacing = editorLineSpacing;
+  if (autosaveEnabled !== undefined) State.settings.autosaveEnabled = autosaveEnabled;
+  if (tocSidebarMode !== undefined) State.settings.tocSidebarMode = tocSidebarMode;
 
   // Re-verify permission on every repository without prompting — a prompt
   // requires a user gesture, done on demand via reauthorizeRepository().
@@ -2222,14 +3129,68 @@ async function setNoteSortOrder(value) {
 async function setScheme(value) {
   State.settings.scheme = value;
   await Storage.setMeta('scheme', value);
-  applyTheme(State.settings.scheme, State.settings.darkMode);
+  applyTheme(State.settings.scheme, State.settings.themeMode);
   scheduleDurableExport();
 }
 
-async function setDarkMode(value) {
-  State.settings.darkMode = value;
-  await Storage.setMeta('darkMode', value);
-  applyTheme(State.settings.scheme, State.settings.darkMode);
+async function setThemeMode(value) {
+  State.settings.themeMode = value;
+  await Storage.setMeta('themeMode', value);
+  applyTheme(State.settings.scheme, State.settings.themeMode);
+  scheduleDurableExport();
+}
+
+async function setLanguage(value) {
+  State.settings.language = value;
+  await Storage.setMeta('language', value);
+  I18n.apply();
+  scheduleDurableExport();
+}
+
+async function setEditorFontFamily(value) {
+  State.settings.editorFontFamily = value;
+  await Storage.setMeta('editorFontFamily', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorFontSize(value) {
+  State.settings.editorFontSize = value;
+  await Storage.setMeta('editorFontSize', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorMarginX(value) {
+  State.settings.editorMarginX = value;
+  await Storage.setMeta('editorMarginX', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorMarginY(value) {
+  State.settings.editorMarginY = value;
+  await Storage.setMeta('editorMarginY', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorLineSpacing(value) {
+  State.settings.editorLineSpacing = value;
+  await Storage.setMeta('editorLineSpacing', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setAutosaveEnabled(value) {
+  State.settings.autosaveEnabled = value;
+  await Storage.setMeta('autosaveEnabled', value);
+  scheduleDurableExport();
+}
+
+async function setTocSidebarMode(value) {
+  State.settings.tocSidebarMode = value;
+  await Storage.setMeta('tocSidebarMode', value);
   scheduleDurableExport();
 }
 
@@ -2558,7 +3519,7 @@ const Themes = (() => {
   async function saveCustomScheme(name, sixColors) {
     customSchemes[name] = schemeFromSixColors(sixColors);
     await persist();
-    if (State.settings.scheme === name) applyTheme(State.settings.scheme, State.settings.darkMode);
+    if (State.settings.scheme === name) applyTheme(State.settings.scheme, State.settings.themeMode);
   }
 
   async function deleteCustomScheme(name) {
@@ -2661,8 +3622,8 @@ const Repositories = (() => {
       if (repo.permission !== 'granted') {
         const badge = document.createElement('button');
         badge.className = 'repo-item-reauth';
-        badge.textContent = 'Ré-autoriser';
-        badge.title = 'La permission d\'accès à ce dossier a expiré ou a été révoquée';
+        badge.textContent = I18n.t('repo.reauthorizeButton');
+        badge.title = I18n.t('repo.reauthorizeTooltip');
         badge.addEventListener('click', async e => {
           e.stopPropagation();
           await reauthorize(repo);
@@ -2675,7 +3636,7 @@ const Repositories = (() => {
 
       const upBtn = document.createElement('button');
       upBtn.textContent = '↑';
-      upBtn.title = 'Monter';
+      upBtn.title = I18n.t('repo.moveUpTooltip');
       upBtn.disabled = idx === 0;
       upBtn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -2686,7 +3647,7 @@ const Repositories = (() => {
 
       const downBtn = document.createElement('button');
       downBtn.textContent = '↓';
-      downBtn.title = 'Descendre';
+      downBtn.title = I18n.t('repo.moveDownTooltip');
       downBtn.disabled = idx === State.repositories.length - 1;
       downBtn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -2697,10 +3658,10 @@ const Repositories = (() => {
 
       const removeBtn = document.createElement('button');
       removeBtn.textContent = '✕';
-      removeBtn.title = 'Retirer ce dépôt (le dossier réel n\'est pas supprimé)';
+      removeBtn.title = I18n.t('repo.removeTooltip');
       removeBtn.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm(`Retirer le dépôt "${repo.name}" ? Le dossier lui-même n'est pas supprimé.`)) return;
+        if (!confirm(I18n.t('repo.removeConfirm', { name: repo.name }))) return;
         await removeRepository(repo.id);
         render();
       });
@@ -2716,7 +3677,7 @@ const Repositories = (() => {
   async function reauthorize(repo) {
     const result = await reauthorizeRepository(repo);
     if (result !== 'granted') {
-      alert('Permission refusée — le dépôt reste inaccessible.');
+      alert(I18n.t('repo.permissionDenied'));
     }
     render();
   }
@@ -2735,7 +3696,7 @@ const Repositories = (() => {
 
   async function addViaPicker() {
     if (!FSA.supported()) {
-      alert('La File System Access API n\'est pas disponible dans ce navigateur — utilisez Chrome, Edge ou Brave.');
+      alert(I18n.t('repo.fsaUnsupported'));
       return;
     }
     let dirHandle;
@@ -2749,7 +3710,7 @@ const Repositories = (() => {
     // duplicate repository pointing at the same directory.
     for (const repo of State.repositories) {
       if (await repo.dirHandle.isSameEntry(dirHandle)) {
-        alert('Ce dossier est déjà enregistré comme dépôt.');
+        alert(I18n.t('repo.alreadyRegistered'));
         return;
       }
     }
@@ -2768,6 +3729,10 @@ const Repositories = (() => {
   function init() {
     el('repo-add-btn').addEventListener('click', addViaPicker);
     render();
+    // Les titres/libellés générés dynamiquement (ré-autoriser, monter,
+    // descendre, retirer) sont reconstruits par render() lui-même — un
+    // simple nouveau rendu suffit à les rafraîchir sur changement de langue.
+    document.addEventListener('i18n:apply', render);
   }
 
   return { init, render, showList };
@@ -2789,7 +3754,30 @@ const Repositories = (() => {
 const Settings = (() => {
   function el(id) { return document.getElementById(id); }
 
+  // Choix de police pour l'éditeur — adapté (pas porté tel quel) de
+  // `EditorFonts.kt`/`EDITOR_FONTS` : les valeurs Android sont des alias de
+  // familles de polices *Android* (`sans-serif-condensed`, etc.), qui ne
+  // veulent rien dire en CSS — remplacés ici par de vraies familles CSS
+  // couvrant le même esprit (une poignée de choix monospace/sans-serif/
+  // serif, pas un gestionnaire de polices custom).
+  const EDITOR_FONTS = [
+    { label: 'Monospace', family: 'monospace' },
+    { label: 'Monospace (Courier)', family: '"Courier New", monospace' },
+    { label: 'Sans-serif', family: 'sans-serif' },
+    { label: 'Sans-serif (Helvetica)', family: '"Helvetica Neue", Arial, sans-serif' },
+    { label: 'Serif', family: 'serif' },
+    { label: 'Cursive', family: 'cursive' },
+  ];
+
+  // Mêmes bornes que SettingsScreen.kt (MIN/MAX_FONT_SIZE_SP,
+  // MIN/MAX_MARGIN_DP, MIN/MAX_LINE_SPACING, *_STEP) — sp/dp Android
+  // deviennent simplement des px ici.
+  const MIN_FONT_SIZE = 10, MAX_FONT_SIZE = 32, FONT_SIZE_STEP = 1;
+  const MIN_MARGIN = 0, MAX_MARGIN = 200, MARGIN_STEP = 4;
+  const MIN_LINE_SPACING = 0.8, MAX_LINE_SPACING = 3.0, LINE_SPACING_STEP = 0.1;
+
   let _returnScreenId = 'repo-screen';
+  let _renderSteppers = () => {}; // reassigned in init(), called from sync()
 
   function open(returnScreenId = 'repo-screen') {
     _returnScreenId = returnScreenId;
@@ -2801,6 +3789,17 @@ const Settings = (() => {
   function close() {
     el('settings-screen').hidden = true;
     el(_returnScreenId).hidden = false;
+  }
+
+  function populateEditorFontOptions() {
+    const select = el('settings-editor-font');
+    select.innerHTML = '';
+    for (const font of EDITOR_FONTS) {
+      const option = document.createElement('option');
+      option.value = font.family;
+      option.textContent = font.label;
+      select.appendChild(option);
+    }
   }
 
   function populateSchemeOptions() {
@@ -2837,10 +3836,18 @@ const Settings = (() => {
   }
 
   function sync() {
+    syncRadioGroup('settings-theme-mode', State.settings.themeMode);
     populateSchemeOptions();
     el('settings-scheme').value = State.settings.scheme;
-    el('settings-dark-mode').checked = State.settings.darkMode;
     renderSchemePreview();
+
+    populateEditorFontOptions();
+    el('settings-editor-font').value = State.settings.editorFontFamily;
+    _renderSteppers();
+    el('settings-autosave').checked = State.settings.autosaveEnabled;
+    el('settings-toc-sidebar').checked = State.settings.tocSidebarMode;
+
+    syncRadioGroup('settings-language', State.settings.language);
 
     el('settings-extensions-input').value = State.settings.noteExtensions;
     el('settings-extensions-all').checked = State.settings.noteExtensionsFilterDisabled;
@@ -2859,22 +3866,97 @@ const Settings = (() => {
     const generated = ZettelkastenLinks.generateId(new Date(), State.settings.idGenerationFormat);
     const regex = ZettelkastenLinks.compileIdRegex(State.settings.idPattern);
     const recognised = regex.test(generated);
-    el('settings-id-preview').textContent = recognised
-      ? `Exemple d'ID généré : ${generated} (reconnu par le motif de détection)`
-      : `Exemple d'ID généré : ${generated} (⚠ NON reconnu par le motif de détection actuel)`;
+    el('settings-id-preview').textContent = I18n.t(
+      recognised ? 'settings.idPreviewMatch' : 'settings.idPreviewMismatch', { id: generated });
+  }
+
+  function roundTo(value, decimals) {
+    const f = Math.pow(10, decimals);
+    return Math.round(value * f) / f;
+  }
+
+  // Groupe de boutons radio générique (mode de thème, langue) — porté du
+  // `RadioButton`/`ThemeMode.entries.forEach` d'Android.
+  function syncRadioGroup(containerId, value) {
+    for (const input of document.querySelectorAll(`#${containerId} input[type=radio]`)) {
+      input.checked = input.value === value;
+    }
+  }
+  function wireRadioGroup(containerId, onSelect) {
+    for (const input of document.querySelectorAll(`#${containerId} input[type=radio]`)) {
+      input.addEventListener('change', () => { if (input.checked) onSelect(input.value); });
+    }
+  }
+
+  // -/+ stepper (font size, margins, line spacing) — one wiring function
+  // covers all four, same shape as Android's Remove/Add IconButton pairs
+  // (`IntStepperRow`/`FloatStepperRow`). The middle value is a real
+  // `<input type="number">` (not a plain span) so an exact value can be
+  // typed directly, not just nudged — explicit request: "il faut pouvoir
+  // entrer une valeur". Applied on blur/Enter, not on every keystroke (an
+  // incomplete number being typed shouldn't get clamped mid-entry).
+  // Returns a `render()` to call from sync()/after any external change.
+  function wireStepper(idPrefix, get, set, min, max, step, decimals = 0) {
+    const dec = el(`${idPrefix}-dec`);
+    const inc = el(`${idPrefix}-inc`);
+    const valueEl = el(`${idPrefix}-value`);
+
+    function render() {
+      const value = get();
+      valueEl.value = decimals ? value.toFixed(decimals) : String(value);
+      dec.disabled = value <= min;
+      inc.disabled = value >= max;
+    }
+    dec.addEventListener('click', async () => {
+      await set(Math.max(min, roundTo(get() - step, decimals)));
+      render();
+    });
+    inc.addEventListener('click', async () => {
+      await set(Math.min(max, roundTo(get() + step, decimals)));
+      render();
+    });
+    async function commit() {
+      const parsed = parseFloat(String(valueEl.value).replace(',', '.'));
+      if (!Number.isNaN(parsed)) {
+        await set(Math.min(max, Math.max(min, roundTo(parsed, decimals))));
+      }
+      render(); // resync the field — also reverts an invalid/out-of-range entry
+    }
+    valueEl.addEventListener('change', commit); // fires on blur, and on Enter in most browsers
+    valueEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); valueEl.blur(); } });
+    return render;
   }
 
   function init() {
+    el('repo-settings-btn').innerHTML = Icons.gear();
+    el('browser-settings-btn').innerHTML = Icons.gear();
     el('repo-settings-btn').addEventListener('click', () => open('repo-screen'));
     el('browser-settings-btn').addEventListener('click', () => open('browser-screen'));
     el('settings-back-btn').addEventListener('click', close);
+    // `updateIdPreview()` construit un texte dynamique (I18n.t) — pas
+    // couvert par le sweep `data-i18n` générique, statique.
+    document.addEventListener('i18n:apply', () => { if (!el('settings-screen').hidden) updateIdPreview(); });
+
+    el('settings-editor-font').addEventListener('change', e => setEditorFontFamily(e.target.value));
+    const renderFontSize = wireStepper('settings-font-size',
+      () => State.settings.editorFontSize, setEditorFontSize, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP);
+    const renderMarginX = wireStepper('settings-margin-x',
+      () => State.settings.editorMarginX, setEditorMarginX, MIN_MARGIN, MAX_MARGIN, MARGIN_STEP);
+    const renderMarginY = wireStepper('settings-margin-y',
+      () => State.settings.editorMarginY, setEditorMarginY, MIN_MARGIN, MAX_MARGIN, MARGIN_STEP);
+    const renderLineSpacing = wireStepper('settings-line-spacing',
+      () => State.settings.editorLineSpacing, setEditorLineSpacing, MIN_LINE_SPACING, MAX_LINE_SPACING, LINE_SPACING_STEP, 1);
+    _renderSteppers = () => { renderFontSize(); renderMarginX(); renderMarginY(); renderLineSpacing(); };
+    el('settings-autosave').addEventListener('change', e => setAutosaveEnabled(e.target.checked));
+    el('settings-toc-sidebar').addEventListener('change', e => setTocSidebarMode(e.target.checked));
 
     el('settings-scheme').addEventListener('change', async e => {
       await setScheme(e.target.value);
       renderSchemePreview();
     });
-    el('settings-dark-mode').addEventListener('change', e => setDarkMode(e.target.checked));
+    wireRadioGroup('settings-theme-mode', value => setThemeMode(value));
     el('settings-edit-theme-btn').addEventListener('click', () => ThemeEditor.openList(sync));
+    wireRadioGroup('settings-language', value => setLanguage(value));
 
     el('settings-extensions-input').addEventListener('change', e => setNoteExtensions(e.target.value));
     el('settings-extensions-all').addEventListener('change', async e => {
@@ -2909,13 +3991,15 @@ const Settings = (() => {
 const ThemeEditor = (() => {
   function el(id) { return document.getElementById(id); }
 
+  // `labelKey` résolu au moment du rendu (pas figé ici) pour suivre un
+  // changement de langue en direct — voir renderColorFields().
   const COLOR_FIELDS = [
-    { key: 'bg', altKey: 'bgAlt', label: 'Fond' },
-    { key: 'fg', altKey: 'fgAlt', label: 'Texte' },
-    { key: 'bgSel', altKey: 'bgSelAlt', label: 'Sélection' },
-    { key: 'heading', altKey: 'headingAlt', label: 'Titre' },
-    { key: 'comment', altKey: 'commentAlt', label: 'Commentaire' },
-    { key: 'markup', altKey: 'markupAlt', label: 'Balisage' }
+    { key: 'bg', altKey: 'bgAlt', labelKey: 'themes.colorBg' },
+    { key: 'fg', altKey: 'fgAlt', labelKey: 'themes.colorFg' },
+    { key: 'bgSel', altKey: 'bgSelAlt', labelKey: 'themes.colorBgSel' },
+    { key: 'heading', altKey: 'headingAlt', labelKey: 'themes.colorHeading' },
+    { key: 'comment', altKey: 'commentAlt', labelKey: 'themes.colorComment' },
+    { key: 'markup', altKey: 'markupAlt', labelKey: 'themes.colorMarkup' }
   ];
 
   let _onReturnToSettings = null;
@@ -2985,23 +4069,23 @@ const ThemeEditor = (() => {
 
       const dupBtn = document.createElement('button');
       dupBtn.textContent = '⧉';
-      dupBtn.title = 'Dupliquer';
+      dupBtn.title = I18n.t('themes.duplicateTooltip');
       dupBtn.addEventListener('click', e => { e.stopPropagation(); openDuplicateDialog(name, scheme); });
       actions.appendChild(dupBtn);
 
       const editBtn = document.createElement('button');
       editBtn.textContent = '✎';
-      editBtn.title = 'Modifier';
+      editBtn.title = I18n.t('themes.editTooltip');
       editBtn.addEventListener('click', e => { e.stopPropagation(); openEditor(name, scheme); });
       actions.appendChild(editBtn);
 
       if (isCustom(name)) {
         const delBtn = document.createElement('button');
         delBtn.textContent = '✕';
-        delBtn.title = 'Supprimer';
+        delBtn.title = I18n.t('themes.deleteTooltip');
         delBtn.addEventListener('click', async e => {
           e.stopPropagation();
-          if (!confirm(`Supprimer le thème "${name}" ?`)) return;
+          if (!confirm(I18n.t('themes.deleteConfirm', { name }))) return;
           await deleteCustomScheme(name);
           renderList();
         });
@@ -3027,8 +4111,8 @@ const ThemeEditor = (() => {
   async function confirmDuplicate() {
     const dlg = el('theme-dup-dlg');
     const name = el('theme-dup-name').value.trim();
-    if (!name) { el('theme-dup-error').textContent = 'Le nom ne peut pas être vide.'; return; }
-    if (getAllSchemeNames().includes(name)) { el('theme-dup-error').textContent = `Un thème "${name}" existe déjà.`; return; }
+    if (!name) { el('theme-dup-error').textContent = I18n.t('themes.nameEmptyError'); return; }
+    if (getAllSchemeNames().includes(name)) { el('theme-dup-error').textContent = I18n.t('themes.nameTakenError', { name }); return; }
     const colors = JSON.parse(dlg.dataset.sourceScheme);
     await saveCustomScheme(name, colors);
     dlg.close();
@@ -3041,9 +4125,9 @@ const ThemeEditor = (() => {
     _editing = {
       originalName,
       colors: Themes.sixColorsFromScheme(scheme),
-      tab: State.settings.darkMode ? 0 : 1 // même résolution que le mode sombre/clair actif — voir theme-editor.js header
+      tab: resolveDarkMode(State.settings.themeMode) ? 0 : 1 // même résolution que le mode sombre/clair actif — voir theme-editor.js header
     };
-    el('theme-editor-title').textContent = originalName ? `Modifier "${originalName}"` : 'Nouveau thème';
+    el('theme-editor-title').textContent = originalName ? I18n.t('themes.editTitle', { name: originalName }) : I18n.t('themes.newTitle');
     el('theme-editor-name').value = originalName;
     el('theme-list-screen').hidden = true;
     el('theme-editor-screen').hidden = false;
@@ -3074,7 +4158,7 @@ const ThemeEditor = (() => {
 
       const label = document.createElement('span');
       label.className = 'theme-color-label';
-      label.textContent = field.label;
+      label.textContent = I18n.t(field.labelKey);
       row.appendChild(label);
 
       const colorInput = document.createElement('input');
@@ -3135,7 +4219,20 @@ const ThemeEditor = (() => {
     renderList();
   }
 
+  function refreshI18nLabels() {
+    el('theme-editor-save').innerHTML = `${Icons.save()} ${I18n.t('common.save')}`;
+    if (!el('theme-list-screen').hidden) renderList();
+    if (_editing && !el('theme-editor-screen').hidden) {
+      el('theme-editor-title').textContent = _editing.originalName
+        ? I18n.t('themes.editTitle', { name: _editing.originalName }) : I18n.t('themes.newTitle');
+      renderColorFields();
+    }
+  }
+
   function init() {
+    refreshI18nLabels();
+    document.addEventListener('i18n:apply', refreshI18nLabels);
+
     el('theme-list-back-btn').addEventListener('click', backToSettings);
     el('theme-list-new-btn').addEventListener('click', newTheme);
 
@@ -3167,14 +4264,28 @@ const ThemeEditor = (() => {
 const Browser = (() => {
   function el(id) { return document.getElementById(id); }
 
-  const SEARCH_PLACEHOLDERS = {
-    name: 'Rechercher par nom…',
-    content: 'Rechercher dans le contenu…',
-    tag: 'Rechercher un tag (sans #)…'
-  };
+  function searchPlaceholder(mode) {
+    if (mode === 'content') return I18n.t('browser.searchPlaceholderContent');
+    if (mode === 'tag') return I18n.t('browser.searchPlaceholderTag');
+    return I18n.t('browser.searchPlaceholderName');
+  }
 
   let _searchMode = 'name'; // 'name' | 'content' | 'tag'
   let _searchDebounce = null;
+
+  // NoteFile ciblé par le menu d'actions (Renommer/Déplacer/Supprimer) —
+  // équivalent web du clic long d'Android (`fileForActions`/`fileToRename`/
+  // `fileToMove`/`fileToDelete`, BrowserScreen.kt) : pas de geste long-press
+  // naturel à la souris, un petit bouton "⋮" par ligne ouvre le même menu.
+  let _actionsFile = null;
+
+  // État de navigation du dialogue "Déplacer" — indépendant de
+  // `State.dirStack` (qui reste celui du navigateur principal) : Android
+  // (`MoveNoteDialog.kt`) démarre toujours à la RACINE du dépôt sélectionné,
+  // pas au dossier actuellement parcouru, et navigue dans sa propre pile.
+  let _moveFile = null;
+  let _moveTargetRepo = null;
+  let _movePath = []; // [{name, handle, path}] racine..courant, dans _moveTargetRepo
 
   function sortFiles(files) {
     const sorted = [...files];
@@ -3189,8 +4300,65 @@ const Browser = (() => {
   function matchesQuery(entry, q) {
     if (_searchMode === 'name') return entry.name.toLowerCase().includes(q) || entry.title.toLowerCase().includes(q);
     if (_searchMode === 'content') return entry.content.toLowerCase().includes(q);
-    if (_searchMode === 'tag') return [...entry.tags].some(t => t.toLowerCase().includes(q));
+    if (_searchMode === 'tag') {
+      // "#voiture" et "voiture" doivent matcher pareil — un tag est toujours
+      // stocké sans le `#` (voir tags.js), on retire juste un `#` de tête
+      // sur la requête si l'utilisateur l'a tapé (même règle qu'Android :
+      // `raw.removePrefix("#")`, pas un retrait de tous les `#`).
+      const cleaned = q.startsWith('#') ? q.slice(1) : q;
+      return [...entry.tags].some(t => t.toLowerCase().includes(cleaned));
+    }
     return false;
+  }
+
+  // Tags distincts de tout le dépôt (pas juste le dossier navigué, comme la
+  // recherche elle-même) avec leur nombre d'occurrences, du plus fréquent
+  // au moins fréquent puis par ordre alphabétique — porté de
+  // `SearchViewModel.loadTagCounts`/`TagBrowserPanel` (Android round 17).
+  // Pas de table dédiée : chaque `Index` entry porte déjà son `Set` de tags
+  // (voir index.js), l'agrégation se fait ici en mémoire au moment de
+  // l'ouverture du panneau, pas dans une base — voir CLAUDE.md pour le
+  // détail de ce choix ("index en mémoire, pas de SQL/FTS").
+  function computeTagCounts(repositoryId) {
+    const counts = new Map();
+    for (const entry of Index.entries(repositoryId)) {
+      for (const tag of entry.tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }
+
+  function openTagBrowser() {
+    const repo = activeRepository();
+    if (!repo) return;
+    const list = el('tag-browser-list');
+    list.innerHTML = '';
+    const counts = computeTagCounts(repo.id);
+    el('tag-browser-empty-hint').hidden = counts.length > 0;
+
+    for (const [tag, count] of counts) {
+      const item = document.createElement('div');
+      item.className = 'tag-browser-item';
+
+      const label = document.createElement('span');
+      label.className = 'tag-browser-tag';
+      label.textContent = `#${tag}`;
+      item.appendChild(label);
+
+      const countSpan = document.createElement('span');
+      countSpan.className = 'tag-browser-count';
+      countSpan.textContent = String(count);
+      item.appendChild(countSpan);
+
+      // Tap remplit le champ de recherche avec ce tag et relance la
+      // recherche — même comportement qu'Android (`updateQuery(tag)`).
+      item.addEventListener('click', () => {
+        el('tag-browser-dlg').close();
+        el('browser-search-input').value = tag;
+        render();
+      });
+      list.appendChild(item);
+    }
+    el('tag-browser-dlg').showModal();
   }
 
   function updateBreadcrumb() {
@@ -3214,8 +4382,230 @@ const Browser = (() => {
     meta.textContent = (file.path && file.path !== file.name) ? `${file.path} — ${dateStr}` : dateStr;
     item.appendChild(meta);
 
+    const actionsBtn = document.createElement('button');
+    actionsBtn.className = 'icon-btn file-item-actions-btn';
+    actionsBtn.title = I18n.t('browser.actionsTooltip');
+    actionsBtn.textContent = '⋮';
+    actionsBtn.addEventListener('click', e => {
+      e.stopPropagation(); // ne pas déclencher l'ouverture de la note
+      openNoteActions(file);
+    });
+    item.appendChild(actionsBtn);
+
     item.addEventListener('click', () => Editor.open(file));
     return item;
+  }
+
+  // --- Menu d'actions par note (Renommer / Déplacer / Supprimer) -------------
+  // Porté de BrowserScreen.kt : `fileForActions` (menu) -> `fileToRename`/
+  // `fileToMove`/`fileToDelete` (dialogues dédiés), même ordre.
+
+  function openNoteActions(file) {
+    _actionsFile = file;
+    el('note-actions-title').textContent = file.name;
+    el('note-actions-dlg').showModal();
+  }
+
+  function closeNoteActions() {
+    el('note-actions-dlg').close();
+  }
+
+  function openRenameFromActions() {
+    const file = _actionsFile;
+    closeNoteActions();
+    if (!file) return;
+    el('note-rename-input').value = file.name;
+    el('note-rename-dlg').showModal();
+    el('note-rename-input').focus();
+    el('note-rename-input').select();
+  }
+
+  // Renomme depuis le navigateur (pas depuis l'éditeur — editor.js a son
+  // propre `confirmRename`, distinct : renommer la note actuellement
+  // ouverte n'a pas besoin d'écrire d'abord le contenu en attente d'une
+  // AUTRE note). Même règle d'extension que partout ailleurs (conserve
+  // l'extension reconnue existante, sinon ajoute la première configurée).
+  async function confirmNoteRenameFromBrowser() {
+    const raw = el('note-rename-input').value.trim();
+    el('note-rename-dlg').close();
+    const file = _actionsFile;
+    const repo = activeRepository();
+    if (!raw || !file || !repo || raw === file.name) return;
+
+    const extensions = noteExtensionsList();
+    const hasRecognisedExt = extensions.some(ext => raw.toLowerCase().endsWith(ext));
+    const newName = hasRecognisedExt ? raw : raw + (extensions[0] || '');
+
+    try {
+      const parentDir = await FSA.getParentDirHandle(repo.dirHandle, file.path);
+      await FSA.renameFile(file.fileHandle, parentDir, newName);
+    } catch (e) {
+      alert(I18n.t('common.renameFailed', { error: e.message }));
+      return;
+    }
+    try {
+      await Index.indexRepository(repo, { forceFull: true });
+    } catch (e) {
+      console.error('Échec de la réindexation après renommage', e);
+    }
+    await rescan();
+  }
+
+  async function deleteFromActions() {
+    const file = _actionsFile;
+    closeNoteActions();
+    if (!file) return;
+    if (!confirm(I18n.t('browser.deleteConfirm', { name: file.name }))) return;
+    const repo = activeRepository();
+    if (!repo) return;
+    try {
+      const parentDir = await FSA.getParentDirHandle(repo.dirHandle, file.path);
+      await FSA.deleteFile(parentDir, file.name);
+    } catch (e) {
+      alert(I18n.t('browser.deleteFailed', { error: e.message }));
+      return;
+    }
+    // Room = projection reconstructible : purge la note (et ses backlinks)
+    // par une réindexation complète, pas une suppression ciblée par chemin
+    // dans chaque structure — même raisonnement qu'Android (round 10).
+    try {
+      await Index.indexRepository(repo, { forceFull: true });
+    } catch (e) {
+      console.error('Échec de la réindexation après suppression', e);
+    }
+    await rescan();
+  }
+
+  // --- Déplacer une note (sous-dossier ou autre dépôt) ------------------------
+  // Porté de MoveNoteDialog.kt : sélecteur de dépôt destination (si plusieurs
+  // dépôts) + navigation dans son arborescence + "Déplacer ici", désactivé
+  // sur l'emplacement actuel. Démarre toujours à la RACINE du dépôt
+  // sélectionné (comportement Android exact, pas le dossier navigué).
+
+  function moveIsCurrentLocation() {
+    if (!_moveTargetRepo || !_movePath.length) return false;
+    const repo = activeRepository();
+    if (!repo || _moveTargetRepo.id !== repo.id) return false;
+    return _movePath[_movePath.length - 1].path === currentDirPath();
+  }
+
+  function openMoveDialog(file) {
+    const repo = activeRepository();
+    if (!repo) return;
+    _moveFile = file;
+    _moveTargetRepo = repo;
+    _movePath = [{ name: repo.name, handle: repo.dirHandle, path: '' }];
+    renderMoveRepoSelect();
+    renderMoveBreadcrumbAndList();
+    el('note-move-file').textContent = I18n.t('browser.moveNoteFileLabel', { name: file.name });
+    el('note-move-dlg').showModal();
+  }
+
+  function renderMoveRepoSelect() {
+    const select = el('note-move-repo-select');
+    select.innerHTML = '';
+    for (const repo of State.repositories) {
+      const opt = document.createElement('option');
+      opt.value = repo.id;
+      opt.textContent = repo.name;
+      select.appendChild(opt);
+    }
+    select.value = _moveTargetRepo.id;
+    el('note-move-repo-row').hidden = State.repositories.length <= 1;
+  }
+
+  async function renderMoveBreadcrumbAndList() {
+    el('note-move-breadcrumb').textContent =
+      [_moveTargetRepo.name, ...(_movePath.slice(1).map(s => s.name))].join(' / ');
+
+    const list = el('note-move-list');
+    list.innerHTML = '';
+    const current = _movePath[_movePath.length - 1];
+
+    if (_movePath.length > 1) {
+      const up = document.createElement('div');
+      up.className = 'file-item folder-item';
+      up.textContent = '⬆ ..';
+      up.addEventListener('click', () => {
+        _movePath.pop();
+        renderMoveBreadcrumbAndList();
+        updateMoveConfirmState();
+      });
+      list.appendChild(up);
+    }
+
+    let subdirs = [];
+    try {
+      ({ subdirs } = await FSA.listChildren(current.handle, [], true));
+    } catch (e) {
+      console.error('Échec de la lecture des sous-dossiers', e);
+    }
+    for (const subdir of subdirs) {
+      const item = document.createElement('div');
+      item.className = 'file-item folder-item';
+      item.innerHTML = Icons.folder();
+      const label = document.createElement('span');
+      label.textContent = subdir.name;
+      item.appendChild(label);
+      item.addEventListener('click', () => {
+        _movePath.push({ name: subdir.name, handle: subdir.handle, path: current.path + subdir.name + '/' });
+        renderMoveBreadcrumbAndList();
+        updateMoveConfirmState();
+      });
+      list.appendChild(item);
+    }
+    if (!subdirs.length && _movePath.length === 1) {
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.textContent = I18n.t('browser.moveNoSubfolderHint');
+      list.appendChild(hint);
+    }
+    updateMoveConfirmState();
+  }
+
+  function updateMoveConfirmState() {
+    el('note-move-confirm').disabled = moveIsCurrentLocation();
+  }
+
+  // Copie le contenu vers la destination, PUIS supprime la source — jamais
+  // l'inverse (perte possible sinon) — même précaution qu'Android
+  // (`moveNote`/`MoveOutcome`, pas `DocumentsContract.moveDocument`, non
+  // fiable entre deux arbres SAF/FSA distincts).
+  async function performMove() {
+    const file = _moveFile;
+    const sourceRepo = activeRepository();
+    const destRepo = _moveTargetRepo;
+    const destEntry = _movePath[_movePath.length - 1];
+    el('note-move-dlg').close();
+    if (!file || !sourceRepo || !destRepo) return;
+
+    let content;
+    try {
+      content = await FSA.readFileText(file.fileHandle);
+    } catch (e) {
+      alert(I18n.t('browser.moveFailed', { error: e.message }));
+      return;
+    }
+
+    try {
+      await FSA.writeNewFile(destEntry.handle, file.name, content);
+    } catch (e) {
+      alert(I18n.t('browser.moveWriteFailed', { error: e.message }));
+      return;
+    }
+
+    try {
+      const parentDir = await FSA.getParentDirHandle(sourceRepo.dirHandle, file.path);
+      await FSA.deleteFile(parentDir, file.name);
+    } catch (e) {
+      alert(I18n.t('browser.movePartialFailure', { error: e.message }));
+    }
+
+    try { await Index.indexRepository(sourceRepo, { forceFull: true }); } catch (e) { console.error(e); }
+    if (destRepo.id !== sourceRepo.id) {
+      try { await Index.indexRepository(destRepo, { forceFull: true }); } catch (e) { console.error(e); }
+    }
+    await rescan();
   }
 
   // Plain browse mode (no search query) — ".." row (unless at the repo
@@ -3234,8 +4624,11 @@ const Browser = (() => {
 
     for (const subdir of State.dirSubdirs) {
       const item = document.createElement('div');
+      // Pas d'icône de dossier : déjà distingué des fichiers par
+      // `.folder-item` (couleur d'accent + gras) sans avoir besoin d'un
+      // glyphe supplémentaire.
       item.className = 'file-item folder-item';
-      item.textContent = `📁 ${subdir.name}`;
+      item.textContent = subdir.name;
       item.addEventListener('click', async () => { await dirEnter(subdir); render(); });
       list.appendChild(item);
       anyRow = true;
@@ -3247,7 +4640,7 @@ const Browser = (() => {
     }
 
     el('browser-empty-hint').hidden = anyRow;
-    el('browser-empty-hint').textContent = 'Aucun fichier ni sous-dossier ici.';
+    el('browser-empty-hint').textContent = I18n.t('browser.emptyHintNoFolder');
   }
 
   function render() {
@@ -3273,7 +4666,7 @@ const Browser = (() => {
       ? sortFiles(Index.entries(repo.id).filter(e => matchesQuery(e, query.toLowerCase())))
       : [];
     el('browser-empty-hint').hidden = results.length > 0;
-    el('browser-empty-hint').textContent = 'Aucun résultat.';
+    el('browser-empty-hint').textContent = I18n.t('browser.emptyHintNoResults');
     results.forEach(file => list.appendChild(renderFileRow(file)));
   }
 
@@ -3313,27 +4706,73 @@ const Browser = (() => {
     reindexActive(); // not awaited — see reindexActive() comment
   }
 
+  // --- Créer une nouvelle note -------------------------------------------------
+  // Porté de BrowserScreen.kt (round 10 Android) : bouton "+" -> dialogue de
+  // nom -> création dans le dossier actuellement affiché -> ouverture directe
+  // dans l'éditeur (contrairement à writhdeck-android, qui se contente de
+  // rafraîchir la liste).
+
+  function openNewNoteDialog() {
+    el('new-note-input').value = '';
+    el('new-note-dlg').showModal();
+    el('new-note-input').focus();
+  }
+
+  async function confirmNewNote() {
+    const raw = el('new-note-input').value.trim();
+    el('new-note-dlg').close();
+    if (!raw) return;
+    const repo = activeRepository();
+    if (!repo) return;
+
+    const extensions = noteExtensionsList();
+    const hasRecognisedExt = extensions.some(ext => raw.toLowerCase().endsWith(ext));
+    const finalName = hasRecognisedExt ? raw : raw + (extensions[0] || '');
+    if (State.repoFiles.some(f => f.name.toLowerCase() === finalName.toLowerCase())) {
+      alert(I18n.t('browser.newNoteAlreadyExists', { name: finalName }));
+      return;
+    }
+
+    let created;
+    try {
+      created = await FSA.createNoteFile(currentDirHandle(), raw, extensions);
+    } catch (e) {
+      alert(I18n.t('browser.newNoteFailed', { error: e.message }));
+      return;
+    }
+    const file = {
+      path: currentDirPath() + created.name, name: created.name,
+      fileHandle: created.handle, lastModified: Date.now()
+    };
+    try {
+      await Index.indexNote(repo.id, file, '');
+    } catch (e) {
+      console.error('Échec de l\'indexation de la nouvelle note', e);
+    }
+    Editor.open(file);
+  }
+
   async function repairAllLinks() {
     const repo = activeRepository();
     if (!repo) return;
     el('browser-repair-btn').disabled = true;
     try {
       const count = await Index.repairAllLinks(repo.id, repo);
-      alert(count > 0 ? `${count} note(s) mise(s) à jour.` : 'Aucun lien à réparer.');
+      alert(count > 0 ? I18n.t('browser.repairDone', { count }) : I18n.t('browser.repairNothing'));
     } finally {
       el('browser-repair-btn').disabled = false;
     }
   }
 
+  // Un seul glyphe pour les deux états (le tri par nom/date n'a pas
+  // d'équivalent monochrome simple et distinct) — le libellé de l'infobulle
+  // dit quel ordre est actif.
   function updateSortButton() {
     const btn = el('browser-sort-btn');
-    if (State.settings.noteSortOrder === 'modified') {
-      btn.textContent = '🕒';
-      btn.title = 'Trier par nom (actuellement : dernière modification)';
-    } else {
-      btn.textContent = '🔤';
-      btn.title = 'Trier par dernière modification (actuellement : nom)';
-    }
+    if (!btn.firstChild) btn.innerHTML = Icons.sort();
+    btn.title = State.settings.noteSortOrder === 'modified'
+      ? I18n.t('browser.sortByNameTooltip')
+      : I18n.t('browser.sortByModifiedTooltip');
   }
 
   async function toggleSort() {
@@ -3361,21 +4800,65 @@ const Browser = (() => {
     Repositories.showList();
   }
 
+  // Libellés construits avec une icône (pas couverts par le sweep
+  // `data-i18n` générique, statique) — regroupés ici pour être rappelés à
+  // la fois à l'init et sur l'évènement `i18n:apply` (changement de langue
+  // en direct, voir i18n.js).
+  function refreshI18nLabels() {
+    el('note-actions-rename').innerHTML = `${Icons.edit()} ${I18n.t('common.rename')}`;
+    el('note-actions-move').innerHTML = `${Icons.folder()} ${I18n.t('browser.moveTitle')}`;
+    el('note-actions-delete').innerHTML = `${Icons.trash()} ${I18n.t('common.delete')}`;
+    el('note-rename-confirm').innerHTML = `${Icons.save()} ${I18n.t('common.rename')}`;
+    updateSortButton();
+    el('browser-search-input').placeholder = searchPlaceholder(_searchMode);
+  }
+
   function init() {
+    el('browser-repair-btn').innerHTML = Icons.wrench();
+    el('browser-tags-btn').innerHTML = Icons.tag();
+    refreshI18nLabels();
+    document.addEventListener('i18n:apply', refreshI18nLabels);
+
     el('browser-back-btn').addEventListener('click', backOrUp);
     el('browser-refresh-btn').addEventListener('click', async () => { await rescan(); reindexActive(); });
     el('browser-repair-btn').addEventListener('click', repairAllLinks);
     el('browser-sort-btn').addEventListener('click', toggleSort);
+    el('browser-new-btn').addEventListener('click', openNewNoteDialog);
+    el('new-note-cancel').addEventListener('click', () => el('new-note-dlg').close());
+    el('new-note-create').addEventListener('click', confirmNewNote);
+    el('new-note-input').addEventListener('keydown', e => { if (e.key === 'Enter') confirmNewNote(); });
+
+    el('note-actions-close').addEventListener('click', closeNoteActions);
+    el('note-actions-rename').addEventListener('click', openRenameFromActions);
+    el('note-actions-move').addEventListener('click', () => { const f = _actionsFile; closeNoteActions(); if (f) openMoveDialog(f); });
+    el('note-actions-delete').addEventListener('click', deleteFromActions);
+
+    el('note-rename-cancel').addEventListener('click', () => el('note-rename-dlg').close());
+    el('note-rename-confirm').addEventListener('click', confirmNoteRenameFromBrowser);
+
+    el('note-move-close').addEventListener('click', () => el('note-move-dlg').close());
+    el('note-move-cancel').addEventListener('click', () => el('note-move-dlg').close());
+    el('note-move-confirm').addEventListener('click', performMove);
+    el('note-move-repo-select').addEventListener('change', e => {
+      _moveTargetRepo = State.repositories.find(r => r.id === e.target.value) || _moveTargetRepo;
+      _movePath = [{ name: _moveTargetRepo.name, handle: _moveTargetRepo.dirHandle, path: '' }];
+      renderMoveBreadcrumbAndList();
+    });
 
     el('browser-search-input').addEventListener('input', scheduleRender);
     for (const btn of document.querySelectorAll('#browser-search-mode button')) {
       btn.addEventListener('click', () => {
         _searchMode = btn.dataset.mode;
         for (const b of document.querySelectorAll('#browser-search-mode button')) b.classList.toggle('active', b === btn);
-        el('browser-search-input').placeholder = SEARCH_PLACEHOLDERS[_searchMode];
+        el('browser-search-input').placeholder = searchPlaceholder(_searchMode);
+        // Le bouton "parcourir les tags" n'a de sens qu'en mode #Tag — même
+        // condition qu'Android (`if (viewModel.mode == SearchMode.TAG)`).
+        el('browser-tags-btn').hidden = _searchMode !== 'tag';
         render();
       });
     }
+    el('browser-tags-btn').addEventListener('click', openTagBrowser);
+    el('tag-browser-close').addEventListener('click', () => el('tag-browser-dlg').close());
 
     el('browser-options-btn').addEventListener('click', openRepoOptions);
     el('repo-options-close').addEventListener('click', () => el('repo-options-dlg').close());
@@ -3388,6 +4871,7 @@ const Browser = (() => {
 
   return { init, render, rescan, openActive };
 })();
+
 
 
 'use strict';
@@ -3412,13 +4896,55 @@ const Editor = (() => {
   let _zkId = null;    // this note's own Zettelkasten ID, if any (from the index or freshly detected)
   let _dirty = false;
   let _previewMode = false;
+  let _baselineMtime = null; // mtime last seen/written on disk — see checkExternalChange()
+  let _checkingExternal = false; // reentrancy guard (focus + save can race)
+  let _autosaveTimer = null; // pending debounced autosave, if any — see scheduleAutosave()
+
+  // Sauvegarde automatique (round 10) — porté d'`EditorViewModel
+  // .scheduleAutosave`/`AUTOSAVE_DELAY_MS` : vrai debounce (2s d'inactivité
+  // de frappe, pas un intervalle fixe — chaque frappe repousse le
+  // déclenchement), appelé à chaque frappe (onInput), et qui appelle
+  // exactement le même `save()` que le bouton manuel (donc soumis aux mêmes
+  // vérifications de modification externe) — pas de chemin simplifié.
+  const AUTOSAVE_DELAY_MS = 2000;
+
+  function scheduleAutosave() {
+    if (_autosaveTimer) { clearTimeout(_autosaveTimer); _autosaveTimer = null; }
+    if (!State.settings.autosaveEnabled) return;
+    _autosaveTimer = setTimeout(() => { _autosaveTimer = null; save(); }, AUTOSAVE_DELAY_MS);
+  }
+
+  function cancelAutosave() {
+    if (_autosaveTimer) { clearTimeout(_autosaveTimer); _autosaveTimer = null; }
+  }
+
+  // Clé de stockage du curseur — équivalent de NoteCursorStore.kt (offset de
+  // caractère par identité de document ; ici `${repositoryId}::${path}` fait
+  // office d'identité stable, pas besoin d'un URI).
+  function cursorKey(repo, file) {
+    return `${repo.id}::${file.path}`;
+  }
+
+  // Sauvegarde la position du curseur de la note ACTUELLEMENT affichée avant
+  // de la quitter (fermeture, ou changement de note via openOther) — même
+  // déclenchement qu'Android (`onDispose`), best-effort.
+  async function saveCursorPosition() {
+    if (!_repo || !_file) return;
+    try {
+      await Storage.setCursor(cursorKey(_repo, _file), ta().selectionStart);
+    } catch (e) {
+      console.error('Échec de la sauvegarde de la position du curseur', e);
+    }
+  }
 
   async function open(file) {
+    await saveCursorPosition(); // de la note précédente, si l'éditeur était déjà ouvert sur une autre
+
     let content;
     try {
       content = await FSA.readFileText(file.fileHandle);
     } catch (e) {
-      alert(`Impossible d'ouvrir "${file.name}" : ${e.message}`);
+      alert(I18n.t('editor.openFailed', { name: file.name, error: e.message }));
       return;
     }
 
@@ -3427,13 +4953,18 @@ const Editor = (() => {
     _dirty = false;
     _previewMode = false;
     _zkId = detectZkId(file, content);
+    try {
+      _baselineMtime = (await file.fileHandle.getFile()).lastModified;
+    } catch (e) {
+      _baselineMtime = file.lastModified;
+    }
 
     el('browser-screen').hidden = true;
     el('editor-screen').hidden = false;
     el('ed-wrap').hidden = false;
     el('ed-preview').hidden = true;
-    el('editor-preview-btn').textContent = '👁';
-    el('editor-preview-btn').title = 'Aperçu';
+    el('editor-preview-btn').innerHTML = Icons.eye();
+    el('editor-preview-btn').title = I18n.t('editor.previewTooltip');
 
     const input = ta();
     input.value = content;
@@ -3441,6 +4972,27 @@ const Editor = (() => {
     updateTitle();
     updateBacklinksBadge();
     input.focus();
+
+    // Si le panneau TOC latéral était déjà affiché (note précédente dans la
+    // même session éditeur), le rafraîchir pour la note nouvellement
+    // ouverte plutôt que de laisser des titres périmés visibles.
+    if (!el('toc-panel').hidden) openTocSidebar();
+
+    // Restaure la position du curseur sauvegardée, sinon retombe sur la fin
+    // du contenu (comportement historique conservé, même repli qu'Android :
+    // "retombe sur la fin du contenu si aucune position connue").
+    let offset = content.length;
+    if (_repo) {
+      try {
+        const stored = await Storage.getCursor(cursorKey(_repo, file));
+        if (stored !== undefined && stored >= 0 && stored <= content.length) offset = stored;
+      } catch (e) {
+        console.error('Échec de la lecture de la position du curseur', e);
+      }
+    }
+    input.setSelectionRange(offset, offset);
+    const top = pixelTopForOffset(offset);
+    input.scrollTop = Math.max(0, top - input.clientHeight / 3);
 
     // Rattrape un renommage fait hors de l'app depuis la dernière fois
     // (round 5 Android, "garantie de résistance au renommage") — best-effort,
@@ -3504,6 +5056,7 @@ const Editor = (() => {
   function onInput() {
     rehighlight();
     markDirty();
+    scheduleAutosave();
   }
 
   // Directly assigning `input.value` (as this used to do) clears the
@@ -3551,18 +5104,27 @@ const Editor = (() => {
   }
 
   async function save() {
+    cancelAutosave(); // toute sauvegarde (manuelle ou auto) invalide un debounce déjà en vol
     if (!_file || !_dirty) return;
+    const outcome = await checkExternalChange();
+    if (outcome === 'cancel' || outcome === 'reloaded') return; // 'reloaded' : plus rien de local à enregistrer
+
     const content = ta().value;
     try {
       const writable = await _file.fileHandle.createWritable();
       await writable.write(content);
       await writable.close();
     } catch (e) {
-      alert(`Échec de l'enregistrement : ${e.message}`);
+      alert(I18n.t('editor.saveFailed', { error: e.message }));
       return;
     }
     _dirty = false;
     updateTitle();
+    try {
+      _baselineMtime = (await _file.fileHandle.getFile()).lastModified;
+    } catch (e) {
+      // best-effort — une divergence ici ne fait qu'un futur faux-positif
+    }
     if (_repo) {
       try {
         await Index.indexNote(_repo.id, _file, content);
@@ -3575,6 +5137,78 @@ const Editor = (() => {
     }
   }
 
+  // --- Détection de modification externe --------------------------------------
+  // Porté d'Android (`EditorState.Loaded.baselineMtime` /
+  // `EditorViewModel.checkForExternalChanges`, round 5) : avant, aucune
+  // sauvegarde ne vérifiait si le fichier avait changé sur le disque depuis
+  // l'ouverture — un autre outil/processus pouvait voir son travail écrasé
+  // silencieusement. Sans modification locale non enregistrée, un
+  // changement externe est rechargé silencieusement (rien à perdre) ; avec
+  // des modifications en cours, un dialogue à trois choix laisse la main à
+  // l'utilisateur (Écraser / Recharger / Annuler).
+
+  async function reloadFromDisk(file) {
+    const content = await file.text();
+    ta().value = content;
+    _baselineMtime = file.lastModified;
+    _dirty = false;
+    updateTitle();
+    rehighlight();
+    if (_repo) {
+      try {
+        await Index.indexNote(_repo.id, _file, content);
+        updateBacklinksBadge();
+      } catch (e) {
+        console.error('Échec de la réindexation après rechargement externe', e);
+      }
+    }
+  }
+
+  // Retourne 'unchanged' | 'reloaded' | 'overwrite' | 'cancel'.
+  async function checkExternalChange() {
+    if (!_file) return 'unchanged';
+    let file;
+    try {
+      file = await _file.fileHandle.getFile();
+    } catch (e) {
+      return 'unchanged'; // ne bloque jamais sur un échec de lecture du mtime
+    }
+    if (file.lastModified === _baselineMtime) return 'unchanged';
+
+    if (!_dirty) {
+      await reloadFromDisk(file);
+      return 'reloaded';
+    }
+    const choice = await confirmExternalConflict();
+    if (choice === 'reload') {
+      await reloadFromDisk(file);
+      return 'reloaded';
+    }
+    if (choice === 'overwrite') return 'overwrite';
+    return 'cancel';
+  }
+
+  let _externalConflictResolve = null;
+  function confirmExternalConflict() {
+    el('external-conflict-msg').textContent = I18n.t('editor.conflictMsg', { name: _file.name });
+    el('external-conflict-dlg').showModal();
+    return new Promise(resolve => { _externalConflictResolve = resolve; });
+  }
+
+  // Vérifie au retour sur l'onglet/la fenêtre (équivalent de
+  // `LifecycleEventEffect(ON_RESUME)` côté Android) — protégé par
+  // `_checkingExternal` contre un double déclenchement (focus + save
+  // pourraient sinon se chevaucher).
+  async function checkExternalChangeOnResume() {
+    if (_checkingExternal || !_file || el('editor-screen').hidden) return;
+    _checkingExternal = true;
+    try {
+      await checkExternalChange();
+    } finally {
+      _checkingExternal = false;
+    }
+  }
+
   // Yes/No/Cancel confirmation (Yes = save & close, No = discard & close,
   // Cancel = stay open) via the #close-confirm-dlg <dialog> — a native
   // confirm() only offers two buttons, which would force "Cancel" to mean
@@ -3582,7 +5216,7 @@ const Editor = (() => {
   // writhdeck-web's confirmSaveBeforeClose, ported here in simplified form).
   let _closeConfirmResolve = null;
   function confirmSaveBeforeClose(name) {
-    el('close-confirm-msg').textContent = `Enregistrer les modifications de "${name}" avant de fermer ?`;
+    el('close-confirm-msg').textContent = I18n.t('editor.saveConfirmMsg', { name });
     el('close-confirm-dlg').showModal();
     return new Promise(resolve => { _closeConfirmResolve = resolve; });
   }
@@ -3604,22 +5238,26 @@ const Editor = (() => {
 
   async function requestClose() {
     if (!(await requestLeave())) return;
-    close();
+    await close();
   }
 
   // Ouvre une autre note depuis l'éditeur (backlink, ZkLink cliqué en
   // aperçu) — remplace la note affichée sans repasser par le navigateur.
   async function openOther(file) {
     if (!(await requestLeave())) return;
-    await open(file);
+    await open(file); // open() sauvegarde lui-même la position du curseur de la note quittée
   }
 
-  function close() {
+  async function close() {
+    cancelAutosave();
+    await saveCursorPosition();
     _repo = null;
     _file = null;
     _zkId = null;
     _dirty = false;
     _previewMode = false;
+    _baselineMtime = null;
+    hideTocSidebar();
     el('editor-screen').hidden = true;
     el('browser-screen').hidden = false;
     Browser.rescan();
@@ -3633,13 +5271,13 @@ const Editor = (() => {
       el('ed-preview').innerHTML = Txt2TagsRender.renderAstToHtml(ast, { resolveZkLink });
       el('ed-wrap').hidden = true;
       el('ed-preview').hidden = false;
-      el('editor-preview-btn').textContent = '✏️';
-      el('editor-preview-btn').title = 'Édition';
+      el('editor-preview-btn').innerHTML = Icons.eyeOff();
+      el('editor-preview-btn').title = I18n.t('editor.editTooltip');
     } else {
       el('ed-wrap').hidden = false;
       el('ed-preview').hidden = true;
-      el('editor-preview-btn').textContent = '👁';
-      el('editor-preview-btn').title = 'Aperçu';
+      el('editor-preview-btn').innerHTML = Icons.eye();
+      el('editor-preview-btn').title = I18n.t('editor.previewTooltip');
       rehighlight();
     }
     updateEditorMenuVisibility();
@@ -3763,25 +5401,70 @@ const Editor = (() => {
   }
 
   // --- Table des matières ----------------------------------------------------
+  // Deux présentations possibles (réglage `State.settings.tocSidebarMode`,
+  // round 11, sur le modèle de writhdeck-web's `toc.js`) : la fenêtre modale
+  // `<dialog>` historique, ou un panneau latéral fixe qui rétrécit
+  // réellement la colonne de l'éditeur (jamais une surimpression). Le
+  // contenu (liste des titres) est construit une seule fois par
+  // `renderTocList`, partagé entre les deux présentations.
 
   function openToc() {
-    const entries = Txt2TagsToc.build(ta().value);
-    const list = el('toc-list');
-    list.innerHTML = '';
-    el('toc-empty-hint').hidden = entries.length > 0;
+    if (State.settings.tocSidebarMode) {
+      toggleTocSidebar();
+      return;
+    }
+    openTocDialog();
+  }
 
+  // Construit les lignes de titres dans `container` ; `onNavigate(entry,
+  // index)` est appelé au clic — chaque présentation décide elle-même ce
+  // qui doit se passer ensuite (fermer la modale, ou refermer le panneau
+  // seulement si non épinglé). Retourne le nombre d'entrées.
+  function renderTocList(container, onNavigate) {
+    const entries = Txt2TagsToc.build(ta().value);
+    container.innerHTML = '';
     entries.forEach((entry, index) => {
       const item = document.createElement('div');
       item.className = 'toc-item';
       item.style.paddingLeft = `${12 + (entry.level - 1) * 16}px`;
-      item.textContent = entry.title || '(sans titre)';
-      item.addEventListener('click', () => {
-        el('toc-dlg').close();
-        navigateToToc(entry, index);
-      });
-      list.appendChild(item);
+      item.textContent = entry.title || I18n.t('editor.tocUntitled');
+      item.addEventListener('click', () => onNavigate(entry, index));
+      container.appendChild(item);
     });
+    return entries.length;
+  }
+
+  function openTocDialog() {
+    const count = renderTocList(el('toc-list'), (entry, index) => {
+      el('toc-dlg').close();
+      navigateToToc(entry, index);
+    });
+    el('toc-empty-hint').hidden = count > 0;
     el('toc-dlg').showModal();
+  }
+
+  // --- Panneau TOC latéral -----------------------------------------------
+  // Reste ouvert par défaut après un clic sur un titre (persistant tant
+  // qu'on ne le referme pas explicitement) — pas de mode "épingle" séparé :
+  // retiré à la demande de l'utilisateur ("ne sert à rien, on peut retirer
+  // facilement en cliquant sur l'icône"), le bouton "✕"/la ré-bascule de
+  // l'icône TOC de la barre d'outils suffisent à le fermer.
+
+  function toggleTocSidebar() {
+    if (el('toc-panel').hidden) openTocSidebar();
+    else hideTocSidebar();
+  }
+
+  function openTocSidebar() {
+    const count = renderTocList(el('toc-panel-list'), (entry, index) => {
+      navigateToToc(entry, index);
+    });
+    el('toc-panel-empty-hint').hidden = count > 0;
+    el('toc-panel').hidden = false;
+  }
+
+  function hideTocSidebar() {
+    el('toc-panel').hidden = true;
   }
 
   // En édition : place le curseur et fait défiler jusqu'à la ligne de titre
@@ -3857,6 +5540,11 @@ const Editor = (() => {
     const hasRecognisedExt = extensions.some(ext => raw.toLowerCase().endsWith(ext));
     const newName = hasRecognisedExt ? raw : raw + (extensions[0] || '');
 
+    // Annule un éventuel autosave en attente avant de renommer — sinon il
+    // pourrait se déclencher pendant le renommage/reindex et écrire sur un
+    // baselineMtime/chemin déjà périmé (même précaution qu'Android
+    // `EditorViewModel.renameNote`).
+    cancelAutosave();
     if (_dirty) await save();
 
     let newHandle;
@@ -3864,7 +5552,7 @@ const Editor = (() => {
       const parentDir = await FSA.getParentDirHandle(_repo.dirHandle, _file.path);
       newHandle = await FSA.renameFile(_file.fileHandle, parentDir, newName);
     } catch (e) {
-      alert(`Échec du renommage : ${e.message}`);
+      alert(I18n.t('common.renameFailed', { error: e.message }));
       return;
     }
 
@@ -3885,7 +5573,7 @@ const Editor = (() => {
   async function createBackupNow() {
     if (!_repo || !_file) return;
     const name = await Backup.create(_repo, _file.name, ta().value);
-    alert(name ? `Sauvegarde créée : ${name}` : 'Échec de la sauvegarde.');
+    alert(name ? I18n.t('editor.backupCreated', { name }) : I18n.t('editor.backupFailed'));
   }
 
   async function openBackupRestore() {
@@ -3901,7 +5589,7 @@ const Editor = (() => {
 
       const date = document.createElement('span');
       date.className = 'backup-restore-date';
-      date.textContent = new Date(backup.lastModified).toLocaleString();
+      date.textContent = new Date(backup.lastModified).toLocaleString(I18n.locale());
       item.appendChild(date);
 
       const name = document.createElement('span');
@@ -3923,12 +5611,36 @@ const Editor = (() => {
     el('backup-restore-dlg').showModal();
   }
 
+  // Libellés construits avec une icône — pas couverts par le sweep
+  // `data-i18n` générique (statique) ; rappelés à l'init et sur
+  // l'évènement `i18n:apply` (changement de langue en direct, voir i18n.js).
+  function refreshI18nLabels() {
+    el('editor-menu-insert-id').innerHTML = `${Icons.hash()} ${I18n.t('editor.insertId')}`;
+    el('editor-menu-insert-link').innerHTML = `${Icons.link()} ${I18n.t('editor.insertLink')}`;
+    el('editor-menu-rename').innerHTML = `${Icons.edit()} ${I18n.t('common.rename')}`;
+    el('editor-menu-backup-create').innerHTML = `${Icons.clock()} ${I18n.t('editor.createBackup')}`;
+    el('editor-menu-backup-restore').innerHTML = `${Icons.restore()} ${I18n.t('editor.restoreBackup')}`;
+    el('editor-menu-settings').innerHTML = `${Icons.gear()} ${I18n.t('common.settings')}`;
+    el('rename-note-confirm').innerHTML = `${Icons.save()} ${I18n.t('common.rename')}`;
+    // Le titre de la bascule aperçu/édition dépend du mode courant, pas
+    // seulement de la langue — resynchronisé depuis l'état actuel.
+    el('editor-preview-btn').title = _previewMode ? I18n.t('editor.editTooltip') : I18n.t('editor.previewTooltip');
+  }
+
   function init() {
+    el('editor-toc-btn').innerHTML = Icons.toc();
+    el('editor-backlinks-icon').innerHTML = Icons.link();
+    el('editor-preview-btn').innerHTML = Icons.eye();
+    el('editor-save-btn').innerHTML = Icons.save();
+    refreshI18nLabels();
+    document.addEventListener('i18n:apply', refreshI18nLabels);
+
     el('editor-back-btn').addEventListener('click', requestClose);
     el('editor-save-btn').addEventListener('click', save);
     el('editor-preview-btn').addEventListener('click', togglePreview);
     el('editor-backlinks-btn').addEventListener('click', openBacklinks);
     el('editor-toc-btn').addEventListener('click', openToc);
+    el('toc-panel-close-btn').addEventListener('click', hideTocSidebar);
 
     el('editor-menu-btn').addEventListener('click', toggleEditorMenu);
     el('editor-menu-insert-id').addEventListener('click', runMenuAction(insertId));
@@ -3977,6 +5689,25 @@ const Editor = (() => {
     el('close-confirm-no').addEventListener('click', () => respond('no'));
     el('close-confirm-cancel').addEventListener('click', () => respond('cancel'));
     el('close-confirm-dlg').addEventListener('cancel', e => { e.preventDefault(); respond('cancel'); }); // Esc
+
+    const respondExternal = val => {
+      const resolve = _externalConflictResolve;
+      _externalConflictResolve = null;
+      el('external-conflict-dlg').close();
+      if (resolve) resolve(val);
+    };
+    el('external-conflict-overwrite').addEventListener('click', () => respondExternal('overwrite'));
+    el('external-conflict-reload').addEventListener('click', () => respondExternal('reload'));
+    el('external-conflict-cancel').addEventListener('click', () => respondExternal('cancel'));
+    el('external-conflict-dlg').addEventListener('cancel', e => { e.preventDefault(); respondExternal('cancel'); }); // Esc
+
+    // Équivalent web de `LifecycleEventEffect(ON_RESUME)` — pas de notion de
+    // "reprise d'app" dans un navigateur, le signal le plus proche est le
+    // retour au focus de l'onglet/fenêtre.
+    window.addEventListener('focus', checkExternalChangeOnResume);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') checkExternalChangeOnResume();
+    });
   }
 
   return { init, open };
@@ -3985,8 +5716,24 @@ const Editor = (() => {
 
 'use strict';
 // Entry point.
-function applyTheme(schemeName = 'default', darkMode = true) {
+
+// Résout le mode de thème tri-état ('system'|'light'|'dark', round 9 —
+// remplace l'ancien booléen `darkMode`, unifié avec l'énum `ThemeMode`
+// d'Android) en un simple booléen sombre/clair. 'system' suit
+// `prefers-color-scheme`, réévalué en direct si l'utilisateur change le
+// thème de son OS pendant que l'app est ouverte (voir le listener dans
+// init() ci-dessous) — pas d'équivalent Android exact ici (Android relit sa
+// propre config système à chaque recomposition), mais le même résultat :
+// le thème suit le système sans redémarrer l'app.
+function resolveDarkMode(themeMode) {
+  if (themeMode === 'light') return false;
+  if (themeMode === 'dark') return true;
+  return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
+function applyTheme(schemeName = 'default', themeMode = 'system') {
   const s = getScheme(schemeName);
+  const darkMode = resolveDarkMode(themeMode);
   const root = document.documentElement.style;
   const pick = (key) => darkMode ? s[key] : s[key + 'Alt'];
   root.setProperty('--bg',      pick('bg'));
@@ -4000,20 +5747,42 @@ function applyTheme(schemeName = 'default', darkMode = true) {
   root.setProperty('--bg2',     pick('bg2'));
 }
 
+// Éditeur : police/taille, marges, interligne — réglages globaux (phase 6,
+// "sur le modèle de zettelium-android") appliqués via les mêmes variables
+// CSS déjà utilisées par style.css (--ed-*), jusqu'ici figées à des valeurs
+// par défaut fixes.
+function applyEditorTypography() {
+  const root = document.documentElement.style;
+  const s = State.settings;
+  root.setProperty('--ed-font-family', s.editorFontFamily);
+  root.setProperty('--ed-font-size', s.editorFontSize + 'px');
+  root.setProperty('--ed-margin-x', s.editorMarginX + 'px');
+  root.setProperty('--ed-margin-y', s.editorMarginY + 'px');
+  root.setProperty('--ed-line-spacing', String(s.editorLineSpacing));
+}
+
 async function init() {
   applyTheme(); // default palette immediately, no flash while loadState() (IndexedDB) is in flight
   if (!FSA.supported()) {
-    document.getElementById('repo-support-hint').textContent =
-      'La File System Access API n\'est pas disponible dans ce navigateur — ' +
-      'utilisez Chrome, Edge ou Brave pour gérer des dépôts.';
+    document.getElementById('repo-support-hint').textContent = I18n.t('repo.fsaUnsupportedHint');
   }
   await Promise.all([loadState(), Themes.loadCustomSchemes()]);
-  applyTheme(State.settings.scheme, State.settings.darkMode); // the persisted choice, once known
+  applyTheme(State.settings.scheme, State.settings.themeMode); // the persisted choice, once known
+  applyEditorTypography();
+  I18n.apply();
   Repositories.init();
   Settings.init();
   ThemeEditor.init();
   Browser.init();
   Editor.init();
+
+  // Réévalue le thème si l'OS change de mode clair/sombre pendant que l'app
+  // est ouverte — seulement pertinent en mode 'system' (voir resolveDarkMode).
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+      if (State.settings.themeMode === 'system') applyTheme(State.settings.scheme, State.settings.themeMode);
+    });
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

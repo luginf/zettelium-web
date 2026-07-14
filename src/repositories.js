@@ -27,8 +27,8 @@ const Repositories = (() => {
       if (repo.permission !== 'granted') {
         const badge = document.createElement('button');
         badge.className = 'repo-item-reauth';
-        badge.textContent = 'Ré-autoriser';
-        badge.title = 'La permission d\'accès à ce dossier a expiré ou a été révoquée';
+        badge.textContent = I18n.t('repo.reauthorizeButton');
+        badge.title = I18n.t('repo.reauthorizeTooltip');
         badge.addEventListener('click', async e => {
           e.stopPropagation();
           await reauthorize(repo);
@@ -41,7 +41,7 @@ const Repositories = (() => {
 
       const upBtn = document.createElement('button');
       upBtn.textContent = '↑';
-      upBtn.title = 'Monter';
+      upBtn.title = I18n.t('repo.moveUpTooltip');
       upBtn.disabled = idx === 0;
       upBtn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -52,7 +52,7 @@ const Repositories = (() => {
 
       const downBtn = document.createElement('button');
       downBtn.textContent = '↓';
-      downBtn.title = 'Descendre';
+      downBtn.title = I18n.t('repo.moveDownTooltip');
       downBtn.disabled = idx === State.repositories.length - 1;
       downBtn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -63,10 +63,10 @@ const Repositories = (() => {
 
       const removeBtn = document.createElement('button');
       removeBtn.textContent = '✕';
-      removeBtn.title = 'Retirer ce dépôt (le dossier réel n\'est pas supprimé)';
+      removeBtn.title = I18n.t('repo.removeTooltip');
       removeBtn.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm(`Retirer le dépôt "${repo.name}" ? Le dossier lui-même n'est pas supprimé.`)) return;
+        if (!confirm(I18n.t('repo.removeConfirm', { name: repo.name }))) return;
         await removeRepository(repo.id);
         render();
       });
@@ -82,7 +82,7 @@ const Repositories = (() => {
   async function reauthorize(repo) {
     const result = await reauthorizeRepository(repo);
     if (result !== 'granted') {
-      alert('Permission refusée — le dépôt reste inaccessible.');
+      alert(I18n.t('repo.permissionDenied'));
     }
     render();
   }
@@ -101,7 +101,7 @@ const Repositories = (() => {
 
   async function addViaPicker() {
     if (!FSA.supported()) {
-      alert('La File System Access API n\'est pas disponible dans ce navigateur — utilisez Chrome, Edge ou Brave.');
+      alert(I18n.t('repo.fsaUnsupported'));
       return;
     }
     let dirHandle;
@@ -115,7 +115,7 @@ const Repositories = (() => {
     // duplicate repository pointing at the same directory.
     for (const repo of State.repositories) {
       if (await repo.dirHandle.isSameEntry(dirHandle)) {
-        alert('Ce dossier est déjà enregistré comme dépôt.');
+        alert(I18n.t('repo.alreadyRegistered'));
         return;
       }
     }
@@ -134,6 +134,10 @@ const Repositories = (() => {
   function init() {
     el('repo-add-btn').addEventListener('click', addViaPicker);
     render();
+    // Les titres/libellés générés dynamiquement (ré-autoriser, monter,
+    // descendre, retirer) sont reconstruits par render() lui-même — un
+    // simple nouveau rendu suffit à les rafraîchir sur changement de langue.
+    document.addEventListener('i18n:apply', render);
   }
 
   return { init, render, showList };

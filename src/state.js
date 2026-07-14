@@ -30,10 +30,48 @@ const State = {
     // and persistence as AppSettings.noteSortOrder (Android round 3).
     noteSortOrder: 'name',
 
-    // Theme (phase 6) — scheme name from schemes.js (SCHEMES/customSchemes)
-    // + dark/light, applied via applyTheme() in app.js.
+    // Theme (phase 6/9) — scheme name from schemes.js (SCHEMES/customSchemes)
+    // + a tri-state mode ('system'|'light'|'dark', matching Android's
+    // `ThemeMode` enum — round 9 unification, replaces the earlier plain
+    // boolean `darkMode`), applied via applyTheme() in app.js.
     scheme: 'default',
-    darkMode: true
+    themeMode: 'system',
+
+    // Langue de l'interface ('system'|'fr'|'en') — round 9, port de
+    // `AppLanguage` (Android round 6). Appliquée par `I18n.apply()`
+    // (i18n.js) ; 'system' résout la langue du navigateur au démarrage et à
+    // chaque changement (`navigator.language`), retombant sur le français
+    // si la langue système n'est pas supportée.
+    language: 'system',
+
+    // Editor typography (phase 6, "sur le modèle de zettelium-android" —
+    // SettingsScreen.kt's "Éditeur" section: font family/size, margins,
+    // line spacing). Applied via applyEditorTypography() in app.js. Font
+    // family values are real CSS stacks (see settings.js's EDITOR_FONTS) —
+    // Android's own list is generic *Android* type-face aliases
+    // ("sans-serif-condensed" etc.), which don't mean anything in CSS, so
+    // adapted rather than copied verbatim.
+    editorFontFamily: 'monospace',
+    editorFontSize: 16,
+    editorMarginX: 40,
+    editorMarginY: 24,
+    editorLineSpacing: 1.5,
+
+    // Sauvegarde automatique (round 10) — porté d'`AppSettings
+    // .autosaveEnabled` : désactivée par défaut ("cela sauvegarde
+    // régulièrement... n'est pas souhaité", décision explicite Android
+    // round 3), reste un réglage disponible pour qui la veut. Voir
+    // editor.js `scheduleAutosave()` pour le mécanisme (debounce 2s, même
+    // durée qu'Android).
+    autosaveEnabled: false,
+
+    // Table des matières en panneau latéral (round 11), sur le modèle de
+    // writhdeck-web (`toc.js`) — désactivé par défaut, conserve le
+    // comportement historique (fenêtre modale `<dialog>`) tant qu'on ne
+    // l'active pas explicitement. Le panneau reste ouvert après un clic
+    // sur un titre (persistant), jusqu'à fermeture explicite (round 12 :
+    // le mode "épingle" a été retiré, jugé redondant avec le bouton "✕").
+    tocSidebarMode: false
   }
 };
 
@@ -100,11 +138,9 @@ async function maybeRestoreDurableConfig(repo) {
   if (!Object.keys(settings).length) return;
 
   const knownHint = knownRepositories.length
-    ? `\n\nDépôts connus (à ré-ajouter manuellement, un par un, via « + Dépôt ») : ${knownRepositories.join(', ')}`
+    ? I18n.t('repo.restoreConfigKnownHint', { names: knownRepositories.join(', ') })
     : '';
-  const restore = confirm(
-    `Un fichier de configuration Zettelium a été trouvé dans ce dossier.\n` +
-    `Restaurer les réglages ?${knownHint}`);
+  const restore = confirm(I18n.t('repo.restoreConfigFound') + knownHint);
   if (!restore) return;
 
   Object.assign(State.settings, settings);
@@ -115,7 +151,15 @@ async function maybeRestoreDurableConfig(repo) {
     setIdPattern(State.settings.idPattern),
     setIdGenerationFormat(State.settings.idGenerationFormat),
     setScheme(State.settings.scheme),
-    setDarkMode(State.settings.darkMode)
+    setThemeMode(State.settings.themeMode),
+    setLanguage(State.settings.language),
+    setEditorFontFamily(State.settings.editorFontFamily),
+    setEditorFontSize(State.settings.editorFontSize),
+    setEditorMarginX(State.settings.editorMarginX),
+    setEditorMarginY(State.settings.editorMarginY),
+    setEditorLineSpacing(State.settings.editorLineSpacing),
+    setAutosaveEnabled(State.settings.autosaveEnabled),
+    setTocSidebarMode(State.settings.tocSidebarMode)
   ]);
 }
 
@@ -135,7 +179,9 @@ function activeRepository() {
 }
 
 async function loadState() {
-  const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, darkMode] = await Promise.all([
+  const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, themeMode,
+    language, editorFontFamily, editorFontSize, editorMarginX, editorMarginY, editorLineSpacing, autosaveEnabled,
+    tocSidebarMode] = await Promise.all([
     Storage.getAllRepositories(),
     Storage.getMeta('noteExtensions'),
     Storage.getMeta('noteExtensionsFilterDisabled'),
@@ -143,7 +189,15 @@ async function loadState() {
     Storage.getMeta('idGenerationFormat'),
     Storage.getMeta('noteSortOrder'),
     Storage.getMeta('scheme'),
-    Storage.getMeta('darkMode')
+    Storage.getMeta('themeMode'),
+    Storage.getMeta('language'),
+    Storage.getMeta('editorFontFamily'),
+    Storage.getMeta('editorFontSize'),
+    Storage.getMeta('editorMarginX'),
+    Storage.getMeta('editorMarginY'),
+    Storage.getMeta('editorLineSpacing'),
+    Storage.getMeta('autosaveEnabled'),
+    Storage.getMeta('tocSidebarMode')
   ]);
   State.repositories = (repos || []).sort((a, b) => a.order - b.order);
   if (noteExtensions !== undefined) State.settings.noteExtensions = noteExtensions;
@@ -155,7 +209,15 @@ async function loadState() {
   if (idGenerationFormat !== undefined) State.settings.idGenerationFormat = idGenerationFormat.trim();
   if (noteSortOrder !== undefined) State.settings.noteSortOrder = noteSortOrder;
   if (scheme !== undefined) State.settings.scheme = scheme;
-  if (darkMode !== undefined) State.settings.darkMode = darkMode;
+  if (themeMode !== undefined) State.settings.themeMode = themeMode;
+  if (language !== undefined) State.settings.language = language;
+  if (editorFontFamily !== undefined) State.settings.editorFontFamily = editorFontFamily;
+  if (editorFontSize !== undefined) State.settings.editorFontSize = editorFontSize;
+  if (editorMarginX !== undefined) State.settings.editorMarginX = editorMarginX;
+  if (editorMarginY !== undefined) State.settings.editorMarginY = editorMarginY;
+  if (editorLineSpacing !== undefined) State.settings.editorLineSpacing = editorLineSpacing;
+  if (autosaveEnabled !== undefined) State.settings.autosaveEnabled = autosaveEnabled;
+  if (tocSidebarMode !== undefined) State.settings.tocSidebarMode = tocSidebarMode;
 
   // Re-verify permission on every repository without prompting — a prompt
   // requires a user gesture, done on demand via reauthorizeRepository().
@@ -286,13 +348,67 @@ async function setNoteSortOrder(value) {
 async function setScheme(value) {
   State.settings.scheme = value;
   await Storage.setMeta('scheme', value);
-  applyTheme(State.settings.scheme, State.settings.darkMode);
+  applyTheme(State.settings.scheme, State.settings.themeMode);
   scheduleDurableExport();
 }
 
-async function setDarkMode(value) {
-  State.settings.darkMode = value;
-  await Storage.setMeta('darkMode', value);
-  applyTheme(State.settings.scheme, State.settings.darkMode);
+async function setThemeMode(value) {
+  State.settings.themeMode = value;
+  await Storage.setMeta('themeMode', value);
+  applyTheme(State.settings.scheme, State.settings.themeMode);
+  scheduleDurableExport();
+}
+
+async function setLanguage(value) {
+  State.settings.language = value;
+  await Storage.setMeta('language', value);
+  I18n.apply();
+  scheduleDurableExport();
+}
+
+async function setEditorFontFamily(value) {
+  State.settings.editorFontFamily = value;
+  await Storage.setMeta('editorFontFamily', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorFontSize(value) {
+  State.settings.editorFontSize = value;
+  await Storage.setMeta('editorFontSize', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorMarginX(value) {
+  State.settings.editorMarginX = value;
+  await Storage.setMeta('editorMarginX', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorMarginY(value) {
+  State.settings.editorMarginY = value;
+  await Storage.setMeta('editorMarginY', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setEditorLineSpacing(value) {
+  State.settings.editorLineSpacing = value;
+  await Storage.setMeta('editorLineSpacing', value);
+  applyEditorTypography();
+  scheduleDurableExport();
+}
+
+async function setAutosaveEnabled(value) {
+  State.settings.autosaveEnabled = value;
+  await Storage.setMeta('autosaveEnabled', value);
+  scheduleDurableExport();
+}
+
+async function setTocSidebarMode(value) {
+  State.settings.tocSidebarMode = value;
+  await Storage.setMeta('tocSidebarMode', value);
   scheduleDurableExport();
 }

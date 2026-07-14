@@ -55,6 +55,15 @@ button {
 }
 button:hover { border-color: var(--fg-bar); }
 button:disabled { opacity: 0.4; cursor: default; }
+
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; padding: 3px 8px; }
+.icon-btn svg { display: block; }
+.icon-label-btn { display: inline-flex; align-items: center; gap: 6px; }
+.icon-label-btn svg { display: block; flex-shrink: 0; }
+/* Beats the plain `#editor-menu button { display: block }` rule below
+   (same specificity family, but this one adds the class too) so the icon
+   and label actually sit flex-aligned instead of just stacking inline. */
+#editor-menu button.icon-label-btn { display: flex; align-items: center; gap: 8px; justify-content: flex-start; }
 button:disabled:hover { border-color: transparent; }
 
 input[type="text"], select {
@@ -165,6 +174,60 @@ input[type="text"], select {
 }
 .settings-row input[type="text"], .settings-row select { flex: 1; max-width: 260px; }
 
+/* Interrupteur à bascule (style Android `Switch`) — sous le capot, une
+   vraie <input type="checkbox"> (accessibilité/JS de changement inchangés,
+   seul le rendu visuel diffère d'une case à cocher native). Le libellé
+   vient toujours en premier, l'interrupteur à la fin de la ligne (demande
+   explicite : "met le label en premier et la coche ensuite"). */
+.settings-switch-row { align-items: flex-start; }
+.settings-row-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.settings-row-desc { font-size: 0.8em; color: var(--fg-bar); }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; margin-top: 2px; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+.switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-bar);
+  border: 1px solid var(--fg-bar);
+  border-radius: 11px;
+  transition: background-color 0.15s;
+}
+.switch-track::before {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  left: 2px;
+  top: 2px;
+  background: var(--fg-bar);
+  border-radius: 50%;
+  transition: transform 0.15s, background-color 0.15s;
+}
+.switch input:checked + .switch-track { background: var(--bg-sel); border-color: var(--heading); }
+.switch input:checked + .switch-track::before { transform: translateX(18px); background: var(--heading); }
+
+.settings-stepper { display: flex; align-items: center; gap: 8px; }
+.settings-stepper button { padding: 2px 10px; }
+.settings-stepper-value {
+  min-width: 3.5em;
+  max-width: 4.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font: inherit;
+  background: var(--bg-bar);
+  color: var(--fg);
+  border: 1px solid var(--fg-bar);
+  padding: 2px 4px;
+}
+/* Masque les flèches natives du <input type=number> (Chrome/Edge) — les
+   boutons -/+ existants les rendent redondantes. */
+.settings-stepper-value::-webkit-inner-spin-button,
+.settings-stepper-value::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.settings-stepper-value { -moz-appearance: textfield; }
+
+.settings-radio-group { padding: 2px 0 8px; }
+.settings-radio-row { display: flex; align-items: center; gap: 8px; padding: 6px 16px; cursor: pointer; }
+
 .settings-full-width-btn { display: block; width: 100%; margin: 6px 0 10px; text-align: center; }
 
 #settings-scheme-preview { padding: 4px 0; }
@@ -266,6 +329,12 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
   line-height: 16px;
   text-align: center;
 }
+/* `.editor-badge`'s own `display` has the same specificity as the UA
+   stylesheet's `[hidden] { display: none }` and comes later in the
+   cascade, so it was winning and showing a "0" badge even when hidden was
+   set — explicit override restores the expected behavior (no badge at
+   all with zero backlinks, matching zettelium-android). */
+.editor-badge[hidden] { display: none; }
 
 #editor-menu-wrap { position: relative; }
 #editor-menu {
@@ -293,11 +362,27 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #editor-menu button:hover { background: var(--bg-sel); }
 #editor-menu button[hidden] { display: none; }
 
+/* `#ed-body` est une ligne flex (éditeur/aperçu + panneau TOC latéral en
+   option, round 11) — le panneau, quand affiché, rétrécit réellement la
+   colonne de l'éditeur (vrai partage de l'espace, pas une surimpression),
+   même technique que writhdeck-web's `#ed-body`/`#toc-panel`. */
 #ed-body {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* `#ed-main` reprend le rôle que jouait `#ed-body` avant round 11 (les
+   deux panneaux édition/aperçu s'y superposent en position absolue selon
+   le mode courant). */
+#ed-main {
   flex: 1;
   position: relative;
   overflow: hidden;
   background: var(--bg);
+  min-width: 0; /* un enfant flex ne rétrécit pas sous son contenu par défaut */
 }
 
 #ed-wrap { position: absolute; inset: 0; }
@@ -375,8 +460,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #ed-preview hr { border: none; border-top: 1px solid var(--fg-bar); margin: 1em 0; }
 
 /* ─── Zettelkasten: link picker / backlinks / TOC (phases 5-6) ─────────── */
-#zklink-picker-dlg, #backlinks-dlg, #toc-dlg, #backup-restore-dlg { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
-#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header {
+#zklink-picker-dlg, #backlinks-dlg, #toc-dlg, #backup-restore-dlg, #tag-browser-dlg { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header, #tag-browser-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -385,7 +470,19 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
   flex-shrink: 0;
 }
 #zklink-filter { margin: 8px 12px; }
-#zklink-list, #backlinks-list, #toc-list, #backup-restore-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+#zklink-list, #backlinks-list, #toc-list, #backup-restore-list, #tag-browser-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+
+.tag-browser-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.tag-browser-item:hover { background: var(--bg-bar); }
+.tag-browser-tag { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tag-browser-count { color: var(--fg-bar); font-size: 0.8em; }
 
 #rename-note-body { padding: 8px 20px; }
 #rename-note-input { width: 100%; }
@@ -424,6 +521,28 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 .toc-item:hover { background: var(--bg-bar); }
 
+/* ─── Panneau TOC latéral (round 11, sur le modèle de writhdeck-web) ────── */
+#toc-panel {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--bg-bar);
+  background: var(--bg);
+  overflow: hidden;
+}
+#toc-panel[hidden] { display: none; } /* voir la note sur [hidden] + display ailleurs dans ce fichier */
+#toc-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#toc-panel-header span:first-child { flex: 1; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#toc-panel-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+
 /* ─── Repository options dialog ────────────────────────────────────────── */
 #repo-options-header {
   display: flex;
@@ -434,3 +553,42 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 #repo-options-body { padding: 4px 12px 12px; }
 #repo-options-body .settings-row { border-bottom: none; }
+
+/* ─── Per-note actions (create / rename / move / delete, round 8-gap) ──── */
+.file-item-actions-btn { flex-shrink: 0; }
+
+#new-note-header, #note-actions-header, #note-rename-header, #note-move-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-bar);
+}
+#new-note-body, #note-rename-body { padding: 8px 20px; }
+#new-note-input, #note-rename-input { width: 100%; }
+
+#note-actions-body { display: flex; flex-direction: column; padding: 4px 0; }
+#note-actions-body button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: var(--fg);
+  width: 100%;
+}
+#note-actions-body button:hover { background: var(--bg-sel); }
+
+#note-move-dlg { width: min(440px, 92vw); max-height: 78vh; display: flex; flex-direction: column; }
+#note-move-body { padding: 4px 16px 8px; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+#note-move-file { padding: 4px 0; }
+#note-move-repo-row { border-bottom: none; }
+#note-move-breadcrumb { font-size: 0.85em; color: var(--fg-bar); padding: 8px 0 4px; border-bottom: 1px solid var(--bg-bar); }
+#note-move-list { max-height: 280px; overflow-y: auto; overscroll-behavior: contain; }
+#note-move-list .file-item { padding: 6px 4px; cursor: pointer; }
+#note-move-list .file-item svg { flex-shrink: 0; }
+
+#external-conflict-dlg { width: min(440px, 92vw); }
+#external-conflict-msg { padding: 16px 20px 4px; }

@@ -55,7 +55,7 @@ const Themes = (() => {
   async function saveCustomScheme(name, sixColors) {
     customSchemes[name] = schemeFromSixColors(sixColors);
     await persist();
-    if (State.settings.scheme === name) applyTheme(State.settings.scheme, State.settings.darkMode);
+    if (State.settings.scheme === name) applyTheme(State.settings.scheme, State.settings.themeMode);
   }
 
   async function deleteCustomScheme(name) {

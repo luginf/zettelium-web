@@ -14,13 +14,10 @@
 <div id="repo-screen">
   <div id="repo-header">
     <span id="repo-title">Zettelium</span>
-    <button id="repo-settings-btn" title="Réglages">⚙</button>
-    <button id="repo-add-btn" title="Ajouter un dépôt (dossier)">+ Dépôt</button>
+    <button id="repo-settings-btn" data-i18n-title="common.settings" class="icon-btn"></button>
+    <button id="repo-add-btn" data-i18n-title="repo.addTooltip" data-i18n="repo.addButton"></button>
   </div>
-  <p id="repo-empty-hint" class="hint" hidden>
-    Aucun dépôt enregistré. Un dossier est un dossier réel sur votre disque —
-    cliquez sur « + Dépôt » pour en choisir un.
-  </p>
+  <p id="repo-empty-hint" class="hint" data-i18n="repo.emptyHint" hidden></p>
   <div id="repo-list"></div>
   <p class="hint" id="repo-support-hint"></p>
 </div>
@@ -28,38 +25,105 @@
 <!-- Global settings screen -->
 <div id="settings-screen" hidden>
   <div id="settings-header">
-    <button id="settings-back-btn" title="Retour">←</button>
-    <span>Réglages</span>
+    <button id="settings-back-btn" data-i18n-title="common.back">←</button>
+    <span data-i18n="settings.screenTitle"></span>
   </div>
   <div id="settings-body">
-    <p class="settings-section-title">Thème</p>
-    <label class="settings-row"><span>Palette de couleurs</span>
+    <p class="settings-section-title" data-i18n="settings.sectionTheme"></p>
+    <div class="settings-radio-group" id="settings-theme-mode">
+      <label class="settings-radio-row"><input type="radio" name="settings-theme-mode" value="system"> <span data-i18n="common.system"></span></label>
+      <label class="settings-radio-row"><input type="radio" name="settings-theme-mode" value="light"> <span data-i18n="settings.themeLight"></span></label>
+      <label class="settings-radio-row"><input type="radio" name="settings-theme-mode" value="dark"> <span data-i18n="settings.themeDark"></span></label>
+    </div>
+    <label class="settings-row"><span data-i18n="settings.paletteLabel"></span>
       <select id="settings-scheme"></select>
     </label>
     <div id="settings-scheme-preview">
       <div class="scheme-preview-row">
-        <span class="hint">Sombre</span>
+        <span class="hint" data-i18n="settings.themeDark"></span>
         <span id="settings-scheme-preview-dark" class="scheme-preview-swatches"></span>
       </div>
       <div class="scheme-preview-row">
-        <span class="hint">Clair</span>
+        <span class="hint" data-i18n="settings.themeLight"></span>
         <span id="settings-scheme-preview-light" class="scheme-preview-swatches"></span>
       </div>
     </div>
-    <button id="settings-edit-theme-btn" class="settings-full-width-btn">Modifier les couleurs</button>
-    <label class="settings-row"><input type="checkbox" id="settings-dark-mode"> <span>Mode sombre</span></label>
+    <button id="settings-edit-theme-btn" class="settings-full-width-btn" data-i18n="settings.editColors"></button>
 
-    <p class="settings-section-title">Fichiers</p>
-    <label class="settings-row"><span>Extensions reconnues</span>
+    <p class="settings-section-title" data-i18n="settings.sectionEditor"></p>
+    <label class="settings-row"><span data-i18n="settings.fontLabel"></span>
+      <select id="settings-editor-font"></select>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.fontSizeLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-font-size-dec" type="button">−</button>
+        <input type="number" id="settings-font-size-value" class="settings-stepper-value" step="1">
+        <button id="settings-font-size-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.marginXLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-margin-x-dec" type="button">−</button>
+        <input type="number" id="settings-margin-x-value" class="settings-stepper-value" step="4">
+        <button id="settings-margin-x-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.marginYLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-margin-y-dec" type="button">−</button>
+        <input type="number" id="settings-margin-y-value" class="settings-stepper-value" step="4">
+        <button id="settings-margin-y-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row"><span data-i18n="settings.lineSpacingLabel"></span>
+      <span class="settings-stepper">
+        <button id="settings-line-spacing-dec" type="button">−</button>
+        <input type="number" id="settings-line-spacing-value" class="settings-stepper-value" step="0.1">
+        <button id="settings-line-spacing-inc" type="button">+</button>
+      </span>
+    </label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.autosaveLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.autosaveDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-autosave"><span class="switch-track"></span></span>
+    </label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.tocSidebarLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.tocSidebarDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-toc-sidebar"><span class="switch-track"></span></span>
+    </label>
+
+    <p class="settings-section-title" data-i18n="settings.sectionLanguage"></p>
+    <div class="settings-radio-group" id="settings-language">
+      <label class="settings-radio-row"><input type="radio" name="settings-language" value="system"> <span data-i18n="common.system"></span></label>
+      <!-- "Français"/"English" volontairement non traduits : dans un
+           sélecteur de langue, chaque option s'affiche dans sa propre
+           langue (même convention qu'Android's AppLanguage.nativeLabel). -->
+      <label class="settings-radio-row"><input type="radio" name="settings-language" value="fr"> <span>Français</span></label>
+      <label class="settings-radio-row"><input type="radio" name="settings-language" value="en"> <span>English</span></label>
+    </div>
+
+    <p class="settings-section-title" data-i18n="settings.sectionFiles"></p>
+    <label class="settings-row"><span data-i18n="settings.extensionsLabel"></span>
       <input type="text" id="settings-extensions-input" autocomplete="off">
     </label>
-    <label class="settings-row"><input type="checkbox" id="settings-extensions-all"> <span>Tous les fichiers (ignorer le filtre)</span></label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.extensionsAllLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.extensionsAllDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-extensions-all"><span class="switch-track"></span></span>
+    </label>
 
-    <p class="settings-section-title">Zettelkasten</p>
-    <label class="settings-row"><span>Motif de détection d'ID (regex)</span>
+    <p class="settings-section-title" data-i18n="settings.sectionZettelkasten"></p>
+    <label class="settings-row"><span data-i18n="settings.idPatternLabel"></span>
       <input type="text" id="settings-id-pattern" autocomplete="off">
     </label>
-    <label class="settings-row"><span>Format de génération d'ID</span>
+    <label class="settings-row"><span data-i18n="settings.idFormatLabel"></span>
       <input type="text" id="settings-id-format" autocomplete="off">
     </label>
     <p id="settings-id-preview" class="hint"></p>
@@ -69,9 +133,9 @@
 <!-- Theme list screen -->
 <div id="theme-list-screen" hidden>
   <div id="theme-list-header">
-    <button id="theme-list-back-btn" title="Retour">←</button>
-    <span>Thèmes</span>
-    <button id="theme-list-new-btn" title="Nouveau thème">+</button>
+    <button id="theme-list-back-btn" data-i18n-title="common.back">←</button>
+    <span data-i18n="themes.listTitle"></span>
+    <button id="theme-list-new-btn" data-i18n-title="themes.newTooltip">+</button>
   </div>
   <div id="theme-list"></div>
 </div>
@@ -79,106 +143,128 @@
 <!-- Theme editor screen -->
 <div id="theme-editor-screen" hidden>
   <div id="theme-editor-header">
-    <button id="theme-editor-back-btn" title="Annuler">←</button>
+    <button id="theme-editor-back-btn" data-i18n-title="common.cancel">←</button>
     <span id="theme-editor-title"></span>
   </div>
   <div id="theme-editor-body">
-    <label class="settings-row"><span>Nom</span>
+    <label class="settings-row"><span data-i18n="themes.nameLabel"></span>
       <input type="text" id="theme-editor-name" autocomplete="off">
     </label>
     <div id="theme-tabs">
-      <button id="theme-tab-dark" class="active">Sombre</button>
-      <button id="theme-tab-light">Clair</button>
+      <button id="theme-tab-dark" class="active" data-i18n="settings.themeDark"></button>
+      <button id="theme-tab-light" data-i18n="settings.themeLight"></button>
     </div>
     <div id="theme-editor-colors"></div>
   </div>
   <div class="dlg-btn-row">
-    <button id="theme-editor-cancel">Annuler</button>
-    <button id="theme-editor-save">💾 Enregistrer</button>
+    <button id="theme-editor-cancel" data-i18n="common.cancel"></button>
+    <button id="theme-editor-save" class="icon-label-btn"></button>
   </div>
 </div>
 
 <!-- Duplicate theme (name prompt) -->
 <dialog id="theme-dup-dlg">
   <div id="theme-dup-header">
-    <span>Dupliquer le thème</span>
+    <span data-i18n="themes.duplicateTitle"></span>
   </div>
   <div id="theme-dup-body">
     <input type="text" id="theme-dup-name" autocomplete="off">
     <p id="theme-dup-error" class="hint"></p>
   </div>
   <div class="dlg-btn-row">
-    <button id="theme-dup-cancel">Annuler</button>
-    <button id="theme-dup-create">Créer</button>
+    <button id="theme-dup-cancel" data-i18n="common.cancel"></button>
+    <button id="theme-dup-create" data-i18n="common.create"></button>
   </div>
 </dialog>
 
 <!-- File browser screen (active repository) -->
 <div id="browser-screen" hidden>
   <div id="browser-header">
-    <button id="browser-back-btn" title="Dossier parent (ou retour aux dépôts à la racine)">←</button>
+    <button id="browser-back-btn" data-i18n-title="browser.backTooltip">←</button>
     <span id="browser-title"></span>
-    <button id="browser-options-btn" title="Options du dépôt">⋮</button>
-    <button id="browser-repair-btn" title="Réparer les liens Zettelkasten de ce dépôt">🔗</button>
-    <button id="browser-refresh-btn" title="Rafraîchir la liste">⟳</button>
-    <button id="browser-settings-btn" title="Réglages">⚙</button>
+    <button id="browser-options-btn" data-i18n-title="browser.repoOptionsTooltip">⋮</button>
+    <button id="browser-repair-btn" data-i18n-title="browser.repairTooltip" class="icon-btn"></button>
+    <button id="browser-new-btn" data-i18n-title="browser.newNoteTooltip">+</button>
+    <button id="browser-refresh-btn" data-i18n-title="browser.refreshTooltip">⟳</button>
+    <button id="browser-settings-btn" data-i18n-title="common.settings" class="icon-btn"></button>
   </div>
   <div id="browser-search-bar">
     <div id="browser-search-mode">
-      <button data-mode="name" class="active">Nom</button>
-      <button data-mode="content">Contenu</button>
-      <button data-mode="tag">#Tag</button>
+      <button data-mode="name" class="active" data-i18n="browser.searchName"></button>
+      <button data-mode="content" data-i18n="browser.searchContent"></button>
+      <button data-mode="tag" data-i18n="browser.searchTag"></button>
     </div>
-    <input type="text" id="browser-search-input" placeholder="Rechercher…" autocomplete="off">
-    <button id="browser-sort-btn" title="Trier par nom">🔤</button>
+    <input type="text" id="browser-search-input" data-i18n-placeholder="browser.searchPlaceholderName" autocomplete="off">
+    <button id="browser-tags-btn" data-i18n-title="browser.tagsTooltip" class="icon-btn" hidden></button>
+    <button id="browser-sort-btn" class="icon-btn"></button>
   </div>
-  <p id="browser-empty-hint" class="hint" hidden>
-    Aucun fichier reconnu comme note dans ce dépôt.
-  </p>
+  <p id="browser-empty-hint" class="hint" data-i18n="browser.emptyHintNoFiles" hidden></p>
   <div id="browser-list"></div>
 </div>
 
 <!-- Repository options -->
 <dialog id="repo-options-dlg">
   <div id="repo-options-header">
-    <span>Options du dépôt</span>
-    <button id="repo-options-close" title="Fermer">✕</button>
+    <span data-i18n="browser.repoOptionsTitle"></span>
+    <button id="repo-options-close" data-i18n-title="common.close">✕</button>
   </div>
   <div id="repo-options-body">
-    <label class="settings-row"><input type="checkbox" id="repo-options-include-extension"> <span>Inclure l'extension dans les liens [[…]]</span></label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="browser.includeExtensionLabel"></span>
+        <span class="settings-row-desc" data-i18n="browser.includeExtensionDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="repo-options-include-extension"><span class="switch-track"></span></span>
+    </label>
   </div>
 </dialog>
 
 <!-- Editor screen -->
 <div id="editor-screen" hidden>
   <div id="ed-header">
-    <button id="editor-back-btn" title="Fermer (retour au dépôt)">✕</button>
+    <button id="editor-back-btn" data-i18n-title="editor.closeTooltip">✕</button>
     <span id="editor-title"></span>
     <div id="ed-actions">
-      <button id="editor-toc-btn" title="Table des matières">📑</button>
-      <button id="editor-backlinks-btn" title="Notes qui font un lien vers celle-ci">
-        <span id="editor-backlinks-badge" class="editor-badge" hidden></span>⛓</button>
-      <button id="editor-preview-btn" title="Aperçu">👁</button>
-      <button id="editor-save-btn" title="Enregistrer (Ctrl+S)" disabled>💾</button>
+      <button id="editor-toc-btn" data-i18n-title="editor.tocTooltip" class="icon-btn"></button>
+      <button id="editor-backlinks-btn" data-i18n-title="editor.backlinksTooltip" class="icon-btn">
+        <span id="editor-backlinks-badge" class="editor-badge" hidden></span>
+        <span id="editor-backlinks-icon"></span>
+      </button>
+      <button id="editor-preview-btn" data-i18n-title="editor.previewTooltip" class="icon-btn"></button>
+      <button id="editor-save-btn" data-i18n-title="editor.saveTooltip" class="icon-btn" disabled></button>
       <div id="editor-menu-wrap">
-        <button id="editor-menu-btn" title="Plus d'actions">⋮</button>
+        <button id="editor-menu-btn" data-i18n-title="editor.moreTooltip">⋮</button>
         <div id="editor-menu" hidden>
-          <button id="editor-menu-insert-id">🔢 Insérer un ID Zettelkasten</button>
-          <button id="editor-menu-insert-link">🔗 Insérer un lien</button>
-          <button id="editor-menu-rename">✏️ Renommer</button>
-          <button id="editor-menu-backup-create">🕘 Créer une sauvegarde</button>
-          <button id="editor-menu-backup-restore">♻️ Restaurer une sauvegarde</button>
-          <button id="editor-menu-settings">⚙ Réglages</button>
+          <button id="editor-menu-insert-id" class="icon-label-btn"></button>
+          <button id="editor-menu-insert-link" class="icon-label-btn"></button>
+          <button id="editor-menu-rename" class="icon-label-btn"></button>
+          <button id="editor-menu-backup-create" class="icon-label-btn"></button>
+          <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
+          <button id="editor-menu-settings" class="icon-label-btn"></button>
         </div>
       </div>
     </div>
   </div>
   <div id="ed-body">
-    <div id="ed-wrap">
-      <pre id="ed-highlight" aria-hidden="true"></pre>
-      <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div id="ed-main">
+      <div id="ed-wrap">
+        <pre id="ed-highlight" aria-hidden="true"></pre>
+        <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      </div>
+      <div id="ed-preview" hidden></div>
     </div>
-    <div id="ed-preview" hidden></div>
+    <!-- Panneau TOC latéral (réglage settings.tocSidebarMode) — sur le
+         modèle de writhdeck-web : colonne flex fixe, jamais en surimpression.
+         Reste ouvert après un clic sur un titre ; se referme via le bouton
+         "✕" ou en ré-appuyant sur l'icône TOC de la barre d'outils. -->
+    <div id="toc-panel" hidden>
+      <div id="toc-panel-header">
+        <span data-i18n="editor.tocTooltip"></span>
+        <button id="toc-panel-close-btn" data-i18n-title="common.close" class="icon-btn">✕</button>
+      </div>
+      <p id="toc-panel-empty-hint" class="hint" data-i18n="editor.tocEmptyHint" hidden></p>
+      <div id="toc-panel-list"></div>
+    </div>
   </div>
 </div>
 
@@ -186,65 +272,146 @@
 <dialog id="close-confirm-dlg">
   <p id="close-confirm-msg"></p>
   <div class="dlg-btn-row">
-    <button id="close-confirm-yes">Enregistrer et fermer</button>
-    <button id="close-confirm-no">Fermer sans enregistrer</button>
-    <button id="close-confirm-cancel">Annuler</button>
+    <button id="close-confirm-yes" data-i18n="editor.saveAndClose"></button>
+    <button id="close-confirm-no" data-i18n="editor.closeWithoutSaving"></button>
+    <button id="close-confirm-cancel" data-i18n="common.cancel"></button>
   </div>
 </dialog>
 
 <!-- Insert-link picker (filterable) -->
 <dialog id="zklink-picker-dlg">
   <div id="zklink-picker-header">
-    <span>Insérer un lien</span>
-    <button id="zklink-picker-close" title="Fermer">✕</button>
+    <span data-i18n="editor.insertLinkTitle"></span>
+    <button id="zklink-picker-close" data-i18n-title="common.close">✕</button>
   </div>
-  <input type="text" id="zklink-filter" placeholder="Filtrer par nom, titre ou ID…" autocomplete="off">
-  <p id="zklink-empty-hint" class="hint" hidden>Aucune note avec un ID Zettelkasten ne correspond.</p>
+  <input type="text" id="zklink-filter" data-i18n-placeholder="editor.linkFilterPlaceholder" autocomplete="off">
+  <p id="zklink-empty-hint" class="hint" data-i18n="editor.linkEmptyHint" hidden></p>
   <div id="zklink-list"></div>
 </dialog>
 
 <!-- Backlinks panel -->
 <dialog id="backlinks-dlg">
   <div id="backlinks-header">
-    <span>Notes qui font un lien vers celle-ci</span>
-    <button id="backlinks-close" title="Fermer">✕</button>
+    <span data-i18n="editor.backlinksTooltip"></span>
+    <button id="backlinks-close" data-i18n-title="common.close">✕</button>
   </div>
-  <p id="backlinks-empty-hint" class="hint" hidden>Aucune note ne référence celle-ci pour l'instant.</p>
+  <p id="backlinks-empty-hint" class="hint" data-i18n="editor.backlinksEmptyHint" hidden></p>
   <div id="backlinks-list"></div>
 </dialog>
 
 <!-- Table of contents -->
 <dialog id="toc-dlg">
   <div id="toc-header">
-    <span>Table des matières</span>
-    <button id="toc-close" title="Fermer">✕</button>
+    <span data-i18n="editor.tocTooltip"></span>
+    <button id="toc-close" data-i18n-title="common.close">✕</button>
   </div>
-  <p id="toc-empty-hint" class="hint" hidden>Aucun titre détecté dans cette note.</p>
+  <p id="toc-empty-hint" class="hint" data-i18n="editor.tocEmptyHint" hidden></p>
   <div id="toc-list"></div>
 </dialog>
 
-<!-- Rename note -->
+<!-- Rename note (editor's own note) -->
 <dialog id="rename-note-dlg">
   <div id="rename-note-header">
-    <span>Renommer</span>
+    <span data-i18n="common.rename"></span>
   </div>
   <div id="rename-note-body">
     <input type="text" id="rename-note-input" autocomplete="off">
   </div>
   <div class="dlg-btn-row">
-    <button id="rename-note-cancel">Annuler</button>
-    <button id="rename-note-confirm">💾 Renommer</button>
+    <button id="rename-note-cancel" data-i18n="common.cancel"></button>
+    <button id="rename-note-confirm" class="icon-label-btn"></button>
   </div>
 </dialog>
 
 <!-- Restore backup -->
 <dialog id="backup-restore-dlg">
   <div id="backup-restore-header">
-    <span>Restaurer une sauvegarde</span>
-    <button id="backup-restore-close" title="Fermer">✕</button>
+    <span data-i18n="editor.backupRestoreTitle"></span>
+    <button id="backup-restore-close" data-i18n-title="common.close">✕</button>
   </div>
-  <p id="backup-restore-empty-hint" class="hint" hidden>Aucune sauvegarde pour cette note.</p>
+  <p id="backup-restore-empty-hint" class="hint" data-i18n="editor.backupEmptyHint" hidden></p>
   <div id="backup-restore-list"></div>
+</dialog>
+
+<!-- Tag browser -->
+<dialog id="tag-browser-dlg">
+  <div id="tag-browser-header">
+    <span data-i18n="browser.tagsDlgTitle"></span>
+    <button id="tag-browser-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <p id="tag-browser-empty-hint" class="hint" data-i18n="browser.tagsEmptyHint" hidden></p>
+  <div id="tag-browser-list"></div>
+</dialog>
+
+<!-- New note -->
+<dialog id="new-note-dlg">
+  <div id="new-note-header">
+    <span data-i18n="browser.newNoteTitle"></span>
+  </div>
+  <div id="new-note-body">
+    <input type="text" id="new-note-input" data-i18n-placeholder="browser.newNoteInputPlaceholder" autocomplete="off">
+  </div>
+  <div class="dlg-btn-row">
+    <button id="new-note-cancel" data-i18n="common.cancel"></button>
+    <button id="new-note-create" data-i18n="common.create"></button>
+  </div>
+</dialog>
+
+<!-- Per-file action menu (long-press equivalent) -->
+<dialog id="note-actions-dlg">
+  <div id="note-actions-header">
+    <span id="note-actions-title"></span>
+    <button id="note-actions-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <div id="note-actions-body">
+    <button id="note-actions-rename" class="icon-label-btn"></button>
+    <button id="note-actions-move" class="icon-label-btn"></button>
+    <button id="note-actions-delete" class="icon-label-btn"></button>
+  </div>
+</dialog>
+
+<!-- Rename note (from the browser, not the editor) -->
+<dialog id="note-rename-dlg">
+  <div id="note-rename-header">
+    <span data-i18n="common.rename"></span>
+  </div>
+  <div id="note-rename-body">
+    <input type="text" id="note-rename-input" autocomplete="off">
+  </div>
+  <div class="dlg-btn-row">
+    <button id="note-rename-cancel" data-i18n="common.cancel"></button>
+    <button id="note-rename-confirm" class="icon-label-btn"></button>
+  </div>
+</dialog>
+
+<!-- Move note: destination repository + subfolder navigation -->
+<dialog id="note-move-dlg">
+  <div id="note-move-header">
+    <span data-i18n="browser.moveTitle"></span>
+    <button id="note-move-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <div id="note-move-body">
+    <p id="note-move-file" class="hint"></p>
+    <label id="note-move-repo-row" class="settings-row" hidden><span data-i18n="browser.moveRepoLabel"></span>
+      <select id="note-move-repo-select"></select>
+    </label>
+    <p id="note-move-breadcrumb"></p>
+    <div id="note-move-list"></div>
+  </div>
+  <div class="dlg-btn-row">
+    <button id="note-move-cancel" data-i18n="common.cancel"></button>
+    <button id="note-move-confirm" data-i18n="browser.moveHereButton"></button>
+  </div>
+</dialog>
+
+<!-- External modification conflict (Écraser / Recharger / Annuler) -->
+<dialog id="external-conflict-dlg">
+  <p id="external-conflict-msg"></p>
+  <div class="dlg-btn-row">
+    <button id="external-conflict-overwrite" data-i18n="editor.conflictOverwrite"></button>
+    <button id="external-conflict-reload" data-i18n="editor.conflictReload"></button>
+    <button id="external-conflict-cancel" data-i18n="common.cancel"></button>
+  </div>
 </dialog>
 
 <script>

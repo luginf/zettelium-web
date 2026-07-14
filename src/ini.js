@@ -18,7 +18,15 @@ const INI = (() => {
     id_pattern:                      ['idPattern', 'str'],
     id_generation_format:            ['idGenerationFormat', 'str'],
     scheme:                          ['scheme', 'str'],
-    dark_mode:                       ['darkMode', 'bool'],
+    theme_mode:                      ['themeMode', 'str'],
+    language:                        ['language', 'str'],
+    editor_font_family:              ['editorFontFamily', 'str'],
+    editor_font_size:                ['editorFontSize', 'int'],
+    editor_margin_x:                 ['editorMarginX', 'int'],
+    editor_margin_y:                 ['editorMarginY', 'int'],
+    editor_line_spacing:             ['editorLineSpacing', 'float'],
+    autosave_enabled:                ['autosaveEnabled', 'bool'],
+    toc_sidebar_mode:                ['tocSidebarMode', 'bool'],
   };
   const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, [jsKey]]) => [jsKey, k]));
 
@@ -57,7 +65,10 @@ const INI = (() => {
       const mapping = KEY_MAP[key];
       if (!mapping) continue;
       const [jsKey, type] = mapping;
-      settings[jsKey] = type === 'bool' ? parseBool(val) : val;
+      if (type === 'bool') settings[jsKey] = parseBool(val);
+      else if (type === 'int') settings[jsKey] = parseInt(val, 10);
+      else if (type === 'float') settings[jsKey] = parseFloat(val);
+      else settings[jsKey] = val;
     }
     return { settings, knownRepositories };
   }

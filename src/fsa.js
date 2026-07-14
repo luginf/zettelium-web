@@ -133,9 +133,40 @@ const FSA = (() => {
     return newHandle;
   }
 
+  // Writes `content` into a brand new file named `name` inside `dirHandle`
+  // (creates it). Used both by note creation and by "move" (write to
+  // destination before deleting the source, mirroring Android's
+  // copy-then-delete `moveNote` — never `DocumentsContract.moveDocument`,
+  // not reliably supported across two independent SAF trees there, and
+  // FSA has no equivalent cross-handle move either).
+  async function writeNewFile(dirHandle, name, content) {
+    const handle = await dirHandle.getFileHandle(name, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(content);
+    await writable.close();
+    return handle;
+  }
+
+  // Creates an empty note file, appending the first configured extension if
+  // `name` doesn't already end in a recognised one — same rule as Android's
+  // `SafRepositoryAccess.createNoteFile`/`renameNoteFile` ("conserve
+  // l'extension de note si le nouveau nom n'en porte pas déjà une reconnue").
+  // Returns `{handle, name}` since the final name can differ from the input.
+  async function createNoteFile(dirHandle, name, extensions) {
+    const hasRecognisedExt = extensions.some(ext => name.toLowerCase().endsWith(ext));
+    const finalName = hasRecognisedExt ? name : name + (extensions[0] || '');
+    const handle = await dirHandle.getFileHandle(finalName, { create: true });
+    return { handle, name: finalName };
+  }
+
+  async function deleteFile(dirHandle, name) {
+    await dirHandle.removeEntry(name);
+  }
+
   return {
     supported, pickDirectory, queryPermission, requestPermission,
     isNoteFileName, listChildren, listNoteFilesRecursive, readFileText,
-    getParentDirHandle, renameFile, BACKUPS_DIR_NAME
+    getParentDirHandle, renameFile, writeNewFile, createNoteFile, deleteFile,
+    BACKUPS_DIR_NAME
   };
 })();

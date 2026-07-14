@@ -13,7 +13,30 @@
 const Settings = (() => {
   function el(id) { return document.getElementById(id); }
 
+  // Choix de police pour l'éditeur — adapté (pas porté tel quel) de
+  // `EditorFonts.kt`/`EDITOR_FONTS` : les valeurs Android sont des alias de
+  // familles de polices *Android* (`sans-serif-condensed`, etc.), qui ne
+  // veulent rien dire en CSS — remplacés ici par de vraies familles CSS
+  // couvrant le même esprit (une poignée de choix monospace/sans-serif/
+  // serif, pas un gestionnaire de polices custom).
+  const EDITOR_FONTS = [
+    { label: 'Monospace', family: 'monospace' },
+    { label: 'Monospace (Courier)', family: '"Courier New", monospace' },
+    { label: 'Sans-serif', family: 'sans-serif' },
+    { label: 'Sans-serif (Helvetica)', family: '"Helvetica Neue", Arial, sans-serif' },
+    { label: 'Serif', family: 'serif' },
+    { label: 'Cursive', family: 'cursive' },
+  ];
+
+  // Mêmes bornes que SettingsScreen.kt (MIN/MAX_FONT_SIZE_SP,
+  // MIN/MAX_MARGIN_DP, MIN/MAX_LINE_SPACING, *_STEP) — sp/dp Android
+  // deviennent simplement des px ici.
+  const MIN_FONT_SIZE = 10, MAX_FONT_SIZE = 32, FONT_SIZE_STEP = 1;
+  const MIN_MARGIN = 0, MAX_MARGIN = 200, MARGIN_STEP = 4;
+  const MIN_LINE_SPACING = 0.8, MAX_LINE_SPACING = 3.0, LINE_SPACING_STEP = 0.1;
+
   let _returnScreenId = 'repo-screen';
+  let _renderSteppers = () => {}; // reassigned in init(), called from sync()
 
   function open(returnScreenId = 'repo-screen') {
     _returnScreenId = returnScreenId;
@@ -25,6 +48,17 @@ const Settings = (() => {
   function close() {
     el('settings-screen').hidden = true;
     el(_returnScreenId).hidden = false;
+  }
+
+  function populateEditorFontOptions() {
+    const select = el('settings-editor-font');
+    select.innerHTML = '';
+    for (const font of EDITOR_FONTS) {
+      const option = document.createElement('option');
+      option.value = font.family;
+      option.textContent = font.label;
+      select.appendChild(option);
+    }
   }
 
   function populateSchemeOptions() {
@@ -61,10 +95,18 @@ const Settings = (() => {
   }
 
   function sync() {
+    syncRadioGroup('settings-theme-mode', State.settings.themeMode);
     populateSchemeOptions();
     el('settings-scheme').value = State.settings.scheme;
-    el('settings-dark-mode').checked = State.settings.darkMode;
     renderSchemePreview();
+
+    populateEditorFontOptions();
+    el('settings-editor-font').value = State.settings.editorFontFamily;
+    _renderSteppers();
+    el('settings-autosave').checked = State.settings.autosaveEnabled;
+    el('settings-toc-sidebar').checked = State.settings.tocSidebarMode;
+
+    syncRadioGroup('settings-language', State.settings.language);
 
     el('settings-extensions-input').value = State.settings.noteExtensions;
     el('settings-extensions-all').checked = State.settings.noteExtensionsFilterDisabled;
@@ -83,22 +125,97 @@ const Settings = (() => {
     const generated = ZettelkastenLinks.generateId(new Date(), State.settings.idGenerationFormat);
     const regex = ZettelkastenLinks.compileIdRegex(State.settings.idPattern);
     const recognised = regex.test(generated);
-    el('settings-id-preview').textContent = recognised
-      ? `Exemple d'ID généré : ${generated} (reconnu par le motif de détection)`
-      : `Exemple d'ID généré : ${generated} (⚠ NON reconnu par le motif de détection actuel)`;
+    el('settings-id-preview').textContent = I18n.t(
+      recognised ? 'settings.idPreviewMatch' : 'settings.idPreviewMismatch', { id: generated });
+  }
+
+  function roundTo(value, decimals) {
+    const f = Math.pow(10, decimals);
+    return Math.round(value * f) / f;
+  }
+
+  // Groupe de boutons radio générique (mode de thème, langue) — porté du
+  // `RadioButton`/`ThemeMode.entries.forEach` d'Android.
+  function syncRadioGroup(containerId, value) {
+    for (const input of document.querySelectorAll(`#${containerId} input[type=radio]`)) {
+      input.checked = input.value === value;
+    }
+  }
+  function wireRadioGroup(containerId, onSelect) {
+    for (const input of document.querySelectorAll(`#${containerId} input[type=radio]`)) {
+      input.addEventListener('change', () => { if (input.checked) onSelect(input.value); });
+    }
+  }
+
+  // -/+ stepper (font size, margins, line spacing) — one wiring function
+  // covers all four, same shape as Android's Remove/Add IconButton pairs
+  // (`IntStepperRow`/`FloatStepperRow`). The middle value is a real
+  // `<input type="number">` (not a plain span) so an exact value can be
+  // typed directly, not just nudged — explicit request: "il faut pouvoir
+  // entrer une valeur". Applied on blur/Enter, not on every keystroke (an
+  // incomplete number being typed shouldn't get clamped mid-entry).
+  // Returns a `render()` to call from sync()/after any external change.
+  function wireStepper(idPrefix, get, set, min, max, step, decimals = 0) {
+    const dec = el(`${idPrefix}-dec`);
+    const inc = el(`${idPrefix}-inc`);
+    const valueEl = el(`${idPrefix}-value`);
+
+    function render() {
+      const value = get();
+      valueEl.value = decimals ? value.toFixed(decimals) : String(value);
+      dec.disabled = value <= min;
+      inc.disabled = value >= max;
+    }
+    dec.addEventListener('click', async () => {
+      await set(Math.max(min, roundTo(get() - step, decimals)));
+      render();
+    });
+    inc.addEventListener('click', async () => {
+      await set(Math.min(max, roundTo(get() + step, decimals)));
+      render();
+    });
+    async function commit() {
+      const parsed = parseFloat(String(valueEl.value).replace(',', '.'));
+      if (!Number.isNaN(parsed)) {
+        await set(Math.min(max, Math.max(min, roundTo(parsed, decimals))));
+      }
+      render(); // resync the field — also reverts an invalid/out-of-range entry
+    }
+    valueEl.addEventListener('change', commit); // fires on blur, and on Enter in most browsers
+    valueEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); valueEl.blur(); } });
+    return render;
   }
 
   function init() {
+    el('repo-settings-btn').innerHTML = Icons.gear();
+    el('browser-settings-btn').innerHTML = Icons.gear();
     el('repo-settings-btn').addEventListener('click', () => open('repo-screen'));
     el('browser-settings-btn').addEventListener('click', () => open('browser-screen'));
     el('settings-back-btn').addEventListener('click', close);
+    // `updateIdPreview()` construit un texte dynamique (I18n.t) — pas
+    // couvert par le sweep `data-i18n` générique, statique.
+    document.addEventListener('i18n:apply', () => { if (!el('settings-screen').hidden) updateIdPreview(); });
+
+    el('settings-editor-font').addEventListener('change', e => setEditorFontFamily(e.target.value));
+    const renderFontSize = wireStepper('settings-font-size',
+      () => State.settings.editorFontSize, setEditorFontSize, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP);
+    const renderMarginX = wireStepper('settings-margin-x',
+      () => State.settings.editorMarginX, setEditorMarginX, MIN_MARGIN, MAX_MARGIN, MARGIN_STEP);
+    const renderMarginY = wireStepper('settings-margin-y',
+      () => State.settings.editorMarginY, setEditorMarginY, MIN_MARGIN, MAX_MARGIN, MARGIN_STEP);
+    const renderLineSpacing = wireStepper('settings-line-spacing',
+      () => State.settings.editorLineSpacing, setEditorLineSpacing, MIN_LINE_SPACING, MAX_LINE_SPACING, LINE_SPACING_STEP, 1);
+    _renderSteppers = () => { renderFontSize(); renderMarginX(); renderMarginY(); renderLineSpacing(); };
+    el('settings-autosave').addEventListener('change', e => setAutosaveEnabled(e.target.checked));
+    el('settings-toc-sidebar').addEventListener('change', e => setTocSidebarMode(e.target.checked));
 
     el('settings-scheme').addEventListener('change', async e => {
       await setScheme(e.target.value);
       renderSchemePreview();
     });
-    el('settings-dark-mode').addEventListener('change', e => setDarkMode(e.target.checked));
+    wireRadioGroup('settings-theme-mode', value => setThemeMode(value));
     el('settings-edit-theme-btn').addEventListener('click', () => ThemeEditor.openList(sync));
+    wireRadioGroup('settings-language', value => setLanguage(value));
 
     el('settings-extensions-input').addEventListener('change', e => setNoteExtensions(e.target.value));
     el('settings-extensions-all').addEventListener('change', async e => {

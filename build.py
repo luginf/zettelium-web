@@ -8,6 +8,8 @@ BASE = os.path.join(os.path.dirname(__file__), 'src')
 # PLAN.md section 1: same no-bundler convention as writhdeck-web).
 JS_ORDER = [
     'schemes.js',
+    'icons.js',
+    'i18n.js',
     'storage.js',
     'fsa.js',
     'txt2tags/regexes.js',

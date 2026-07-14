@@ -12,13 +12,15 @@
 const ThemeEditor = (() => {
   function el(id) { return document.getElementById(id); }
 
+  // `labelKey` résolu au moment du rendu (pas figé ici) pour suivre un
+  // changement de langue en direct — voir renderColorFields().
   const COLOR_FIELDS = [
-    { key: 'bg', altKey: 'bgAlt', label: 'Fond' },
-    { key: 'fg', altKey: 'fgAlt', label: 'Texte' },
-    { key: 'bgSel', altKey: 'bgSelAlt', label: 'Sélection' },
-    { key: 'heading', altKey: 'headingAlt', label: 'Titre' },
-    { key: 'comment', altKey: 'commentAlt', label: 'Commentaire' },
-    { key: 'markup', altKey: 'markupAlt', label: 'Balisage' }
+    { key: 'bg', altKey: 'bgAlt', labelKey: 'themes.colorBg' },
+    { key: 'fg', altKey: 'fgAlt', labelKey: 'themes.colorFg' },
+    { key: 'bgSel', altKey: 'bgSelAlt', labelKey: 'themes.colorBgSel' },
+    { key: 'heading', altKey: 'headingAlt', labelKey: 'themes.colorHeading' },
+    { key: 'comment', altKey: 'commentAlt', labelKey: 'themes.colorComment' },
+    { key: 'markup', altKey: 'markupAlt', labelKey: 'themes.colorMarkup' }
   ];
 
   let _onReturnToSettings = null;
@@ -88,23 +90,23 @@ const ThemeEditor = (() => {
 
       const dupBtn = document.createElement('button');
       dupBtn.textContent = '⧉';
-      dupBtn.title = 'Dupliquer';
+      dupBtn.title = I18n.t('themes.duplicateTooltip');
       dupBtn.addEventListener('click', e => { e.stopPropagation(); openDuplicateDialog(name, scheme); });
       actions.appendChild(dupBtn);
 
       const editBtn = document.createElement('button');
       editBtn.textContent = '✎';
-      editBtn.title = 'Modifier';
+      editBtn.title = I18n.t('themes.editTooltip');
       editBtn.addEventListener('click', e => { e.stopPropagation(); openEditor(name, scheme); });
       actions.appendChild(editBtn);
 
       if (isCustom(name)) {
         const delBtn = document.createElement('button');
         delBtn.textContent = '✕';
-        delBtn.title = 'Supprimer';
+        delBtn.title = I18n.t('themes.deleteTooltip');
         delBtn.addEventListener('click', async e => {
           e.stopPropagation();
-          if (!confirm(`Supprimer le thème "${name}" ?`)) return;
+          if (!confirm(I18n.t('themes.deleteConfirm', { name }))) return;
           await deleteCustomScheme(name);
           renderList();
         });
@@ -130,8 +132,8 @@ const ThemeEditor = (() => {
   async function confirmDuplicate() {
     const dlg = el('theme-dup-dlg');
     const name = el('theme-dup-name').value.trim();
-    if (!name) { el('theme-dup-error').textContent = 'Le nom ne peut pas être vide.'; return; }
-    if (getAllSchemeNames().includes(name)) { el('theme-dup-error').textContent = `Un thème "${name}" existe déjà.`; return; }
+    if (!name) { el('theme-dup-error').textContent = I18n.t('themes.nameEmptyError'); return; }
+    if (getAllSchemeNames().includes(name)) { el('theme-dup-error').textContent = I18n.t('themes.nameTakenError', { name }); return; }
     const colors = JSON.parse(dlg.dataset.sourceScheme);
     await saveCustomScheme(name, colors);
     dlg.close();
@@ -144,9 +146,9 @@ const ThemeEditor = (() => {
     _editing = {
       originalName,
       colors: Themes.sixColorsFromScheme(scheme),
-      tab: State.settings.darkMode ? 0 : 1 // même résolution que le mode sombre/clair actif — voir theme-editor.js header
+      tab: resolveDarkMode(State.settings.themeMode) ? 0 : 1 // même résolution que le mode sombre/clair actif — voir theme-editor.js header
     };
-    el('theme-editor-title').textContent = originalName ? `Modifier "${originalName}"` : 'Nouveau thème';
+    el('theme-editor-title').textContent = originalName ? I18n.t('themes.editTitle', { name: originalName }) : I18n.t('themes.newTitle');
     el('theme-editor-name').value = originalName;
     el('theme-list-screen').hidden = true;
     el('theme-editor-screen').hidden = false;
@@ -177,7 +179,7 @@ const ThemeEditor = (() => {
 
       const label = document.createElement('span');
       label.className = 'theme-color-label';
-      label.textContent = field.label;
+      label.textContent = I18n.t(field.labelKey);
       row.appendChild(label);
 
       const colorInput = document.createElement('input');
@@ -238,7 +240,20 @@ const ThemeEditor = (() => {
     renderList();
   }
 
+  function refreshI18nLabels() {
+    el('theme-editor-save').innerHTML = `${Icons.save()} ${I18n.t('common.save')}`;
+    if (!el('theme-list-screen').hidden) renderList();
+    if (_editing && !el('theme-editor-screen').hidden) {
+      el('theme-editor-title').textContent = _editing.originalName
+        ? I18n.t('themes.editTitle', { name: _editing.originalName }) : I18n.t('themes.newTitle');
+      renderColorFields();
+    }
+  }
+
   function init() {
+    refreshI18nLabels();
+    document.addEventListener('i18n:apply', refreshI18nLabels);
+
     el('theme-list-back-btn').addEventListener('click', backToSettings);
     el('theme-list-new-btn').addEventListener('click', newTheme);
 

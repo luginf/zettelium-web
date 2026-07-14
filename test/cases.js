@@ -609,18 +609,18 @@ test('INI.stringify writes recognised settings under [general] and known repo na
 test('INI.stringify omits settings that are undefined', () => {
   const text = INI.stringify({ noteExtensions: 'txt' }, []);
   assert.ok(!text.includes('id_pattern'));
-  assert.ok(!text.includes('dark_mode'));
+  assert.ok(!text.includes('theme_mode'));
 });
 
 test('INI.parse round-trips what INI.stringify wrote', () => {
   const written = INI.stringify(
-    { noteExtensions: 'txt, t2t', noteExtensionsFilterDisabled: false, idPattern: '\\d{14}', darkMode: true },
+    { noteExtensions: 'txt, t2t', noteExtensionsFilterDisabled: false, idPattern: '\\d{14}', themeMode: 'dark' },
     ['Only Repo']);
   const { settings, knownRepositories } = INI.parse(written);
   assert.equal(settings.noteExtensions, 'txt, t2t');
   assert.equal(settings.noteExtensionsFilterDisabled, false);
   assert.equal(settings.idPattern, '\\d{14}');
-  assert.equal(settings.darkMode, true);
+  assert.equal(settings.themeMode, 'dark');
   assert.deepEqual(knownRepositories, ['Only Repo']);
 });
 
@@ -639,4 +639,18 @@ test('INI.parse treats yes/1/true/on as boolean true, anything else as false', (
   }
   const { settings } = INI.parse('[general]\nnote_extensions_filter_disabled = no');
   assert.equal(settings.noteExtensionsFilterDisabled, false);
+});
+
+test('INI round-trips editor typography settings (int/float types)', () => {
+  const written = INI.stringify(
+    { editorFontFamily: 'serif', editorFontSize: 18, editorMarginX: 48, editorMarginY: 20, editorLineSpacing: 1.7 },
+    []);
+  assert.ok(written.includes('editor_font_size = 18'));
+  assert.ok(written.includes('editor_line_spacing = 1.7'));
+  const { settings } = INI.parse(written);
+  assert.equal(settings.editorFontFamily, 'serif');
+  assert.equal(settings.editorFontSize, 18);
+  assert.equal(settings.editorMarginX, 48);
+  assert.equal(settings.editorMarginY, 20);
+  assert.equal(settings.editorLineSpacing, 1.7);
 });

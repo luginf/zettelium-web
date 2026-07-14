@@ -9,7 +9,7 @@
 // IndexedDB round-trip) and global app settings/meta.
 const Storage = (() => {
   const DB_NAME = 'zettelium';
-  const DB_VER  = 1;
+  const DB_VER  = 2;
   let _db = null;
 
   function open() {
@@ -23,6 +23,13 @@ const Storage = (() => {
         }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta', { keyPath: 'key' });
+        }
+        // Curseur par note (offset de caractère), clé = `${repositoryId}::${path}`
+        // — équivalent de NoteCursorStore.kt (Android round 11 : offset de
+        // caractère, pas ligne/colonne, la contrainte ligne/colonne d'un
+        // moteur Tcl ne s'applique pas ici non plus qu'à zettelium-android).
+        if (!db.objectStoreNames.contains('cursors')) {
+          db.createObjectStore('cursors', { keyPath: 'key' });
         }
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
@@ -57,5 +64,12 @@ const Storage = (() => {
     return tx('meta', 'readwrite', s => s.put({ key, value }));
   }
 
-  return { getAllRepositories, putRepository, deleteRepository, getMeta, setMeta };
+  function getCursor(key) {
+    return tx('cursors', 'readonly', s => s.get(key)).then(r => r ? r.offset : undefined);
+  }
+  function setCursor(key, offset) {
+    return tx('cursors', 'readwrite', s => s.put({ key, offset }));
+  }
+
+  return { getAllRepositories, putRepository, deleteRepository, getMeta, setMeta, getCursor, setCursor };
 })();

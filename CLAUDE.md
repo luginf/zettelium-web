@@ -401,6 +401,34 @@ aux réglages) touchent toutes le DOM ou l'API File System Access réelle,
 pas de logique pure nouvelle à isoler. **Non vérifié en conditions
 réelles**, même limite que documentée pour toutes les phases précédentes.
 
+**Round 5 (2026-07-14, retour utilisateur) — recherche par tag avec ou sans
+`#`, navigateur de tags** :
+- **`matchesQuery()` (mode `#Tag`, `browser.js`) retire maintenant un `#` de
+  tête de la requête tapée** avant de comparer aux tags indexés (stockés
+  sans `#`, voir `tags.js`) — `#voiture` et `voiture` matchent désormais
+  pareil. Même règle qu'Android (`SearchViewModel` : `raw.removePrefix("#")`,
+  un seul `#` de tête retiré, pas tous les `#` de la chaîne).
+- **Navigateur de tags** (`#browser-tags-btn` 🏷, visible seulement en mode
+  `#Tag` — même condition qu'Android, `if (viewModel.mode ==
+  SearchMode.TAG)`) : `Browser.computeTagCounts()` agrège les tags de
+  toutes les entrées de l'index du dépôt (portée globale, pas limitée au
+  dossier navigué — comme la recherche elle-même), triés du plus fréquent
+  au moins fréquent puis alphabétique, porté de `SearchViewModel
+  .loadTagCounts`/`TagBrowserPanel` (round 17 Android). Tap un tag remplit
+  le champ de recherche avec ce tag (sans `#`) et relance la recherche —
+  même comportement qu'Android (`updateQuery(tag)`).
+- **Pas de base de données pour les tags** (question explicite de
+  l'utilisateur) : chaque entrée de `Index` (in-memory, voir index.js)
+  porte déjà un `Set` de tags extraits par `TagExtractor.extract()` au
+  moment de l'indexation (scan du dépôt/sauvegarde d'une note) — la
+  recherche par tag et le navigateur de tags ne font que filtrer/agréger
+  ces `Set` déjà en mémoire, aucune requête disque ni base au moment de la
+  frappe. Ce n'est ni une vraie base de données interrogeable, ni un
+  balayage des fichiers en temps réel à chaque recherche : c'est une
+  projection déjà construite (même principe que tout `Index`, PLAN.md
+  section 2 — reconstructible par réindexation, jamais la source de
+  vérité).
+
 ## Décisions structurantes (ne pas revenir dessus sans discussion)
 
 - **Stockage = File System Access API**, un `FileSystemDirectoryHandle` par
@@ -457,6 +485,389 @@ réelles**, même limite que documentée pour toutes les phases précédentes.
   d'`EditorScreen.kt` (même contenu, même ordre). Ne pas remettre
   d'icônes dédiées dans la barre pour ces actions sans redemander à
   l'utilisateur — c'est explicitement ce qu'il a demandé de changer.
+- **La recherche par tag ignore un `#` de tête** (`#voiture` ≡ `voiture`),
+  et les tags eux-mêmes ne sont jamais stockés avec leur `#` — voir
+  `tags.js`/`browser.js` `matchesQuery()`.
+- **Pas d'icônes colorées** : toute icône (hors symboles texte déjà
+  monochromes comme ← ✕ ⋮ + ⟳) vient de `icons.js` (SVG `currentColor`).
+  Ne pas réintroduire d'emoji coloré pour une nouvelle action — ajouter
+  l'icône à `icons.js` à la place, quitte à en dessiner une simple si
+  aucun glyphe Feather/Material connu ne convient.
+- **Les réglages de typographie de l'éditeur (police/taille/marges/
+  interligne) vivent dans l'écran Réglages global, pas dans l'éditeur
+  lui-même** — demande explicite de l'utilisateur, cohérent avec
+  `SettingsScreen.kt` (section "Éditeur" avant "Thème").
+
+**Round 6 (2026-07-14, retour utilisateur) — pastille "0" backlinks
+affichée à tort** : la pastille du nombre de backlinks (`#editor-backlinks-badge`)
+s'affichait comme "0" en rouge au lieu de disparaître complètement quand une
+note n'a aucun backlink — contrairement à Android, qui n'affiche rien du
+tout dans ce cas (`if (count > 0) BadgedBox(...) else Icon(...)`, pas de
+badge à zéro). Cause : `.editor-badge { display: inline-block; ... }`
+(règle d'auteur) a la **même spécificité** que la règle par défaut du
+navigateur `[hidden] { display: none }`, et vient APRÈS dans la cascade —
+elle gagnait donc systématiquement, y compris quand `hidden` était bien
+posé par `updateBacklinksBadge()`. Corrigé avec un `.editor-badge[hidden]
+{ display: none; }` explicite. Piège générique à retenir : tout élément
+qui combine un attribut `hidden` ET une règle d'auteur définissant sa
+propre `display` a besoin de ce genre de règle de secours — sinon
+`hidden` peut silencieusement ne plus rien faire.
+
+**Round 7 (2026-07-14, retour utilisateur) — icônes monochromes partout,
+réglages de typographie de l'éditeur** :
+- **Icône TOC exacte** : demande précise de l'utilisateur ("3 lignes
+  parallèles, avec un point à la fin de chaque ligne") — remplacé l'emoji
+  📑 par le vrai glyphe Material `Icons.AutoMirrored.Filled.Toc` (chemin
+  SVG reproduit directement, pas une approximation).
+- **"De façon générale ne mets pas d'icône colorée si possible"** :
+  nouveau module `icons.js`, fonctions retournant des SVG monochromes
+  (`fill`/`stroke: currentColor`, suivent la couleur du bouton) — remplace
+  tous les emoji colorés (🔗💾👁✏️🔢🕘♻️⚙📁🏷🔤🕒). Priorité à des icônes
+  Feather simples et bien connues (link, save, eye/eye-off, edit-2, clock,
+  rotate-ccw, tool, tag) plutôt qu'à des tentatives risquées de reproduire
+  des tracés Material complexes de mémoire ; deux icônes dessinées à la
+  main (gear = anneau + 8 dents, hash = 4 traits) faute d'équivalent simple
+  connu. Les symboles unicode déjà utilisés ailleurs (← ✕ ⋮ + ↑ ↓ ⟳) n'ont
+  **pas** été touchés : ce sont des glyphes texte à présentation par défaut
+  non colorée (pas des emoji), donc déjà conformes à la demande.
+  Corrections de fidélité au passage, découvertes en confirmant les icônes
+  Android exactes :
+  - Bascule aperçu/édition : utilisait 👁/✏️ (œil/crayon) — Android utilise
+    en réalité `Visibility`/`VisibilityOff` (deux variantes du **même**
+    glyphe œil, barré ou non) ; corrigé pour utiliser `Icons.eye()`/
+    `Icons.eyeOff()` au lieu d'un mélange œil+crayon.
+  - Backlinks et "Insérer un lien" réutilisent maintenant la **même** icône
+    lien (`Icons.link()`), comme Android réutilise `Icons.Filled.Link` pour
+    les deux — au lieu de deux glyphes visuellement différents (⛓ vs 🔗)
+    choisis par erreur lors d'un round précédent.
+  - Les lignes de dossier du navigateur n'ont plus d'icône 📁 du tout :
+    déjà distinguées des fichiers par `.folder-item` (couleur d'accent +
+    gras), une icône supplémentaire aurait été redondante en plus d'être
+    colorée.
+  - Le bouton de tri (nom/date) utilise un seul glyphe "trier" (deux
+    triangles empilés) quel que soit l'état, plutôt que deux emoji
+    distincts (🔤/🕒 sans équivalent monochrome simple et clairement
+    distinct à cette taille) — l'infobulle indique l'ordre actif.
+  - **Écart de fidélité identifié mais volontairement pas corrigé cette
+    session** : `browser-repair-btn` ("réparer les liens") reste un bouton
+    dédié dans la barre du navigateur, alors que l'Android *actuel* range
+    cette action comme simple ligne texte à l'intérieur du dialogue
+    "Options du dépôt" (`RepositoryOptionsDialog`, `BrowserScreen.kt`), qui
+    permet aussi de renommer le *dépôt* lui-même — fonctionnalité absente
+    ici. Non demandé cette session, juste noté (`repo.name` existe déjà
+    côté web, ce serait bon marché à ajouter si demandé).
+- **Réglages de typographie de l'éditeur** (police, taille, marges,
+  interligne), sur le modèle de `SettingsScreen.kt` ("Éditeur", avant la
+  section Thème dans l'ordre Android — replacé pareil ici) :
+  `State.settings.editorFontFamily/editorFontSize/editorMarginX/
+  editorMarginY/editorLineSpacing`, appliqués en direct via les variables
+  CSS `--ed-*` déjà existantes (`applyEditorTypography()` dans `app.js`,
+  jusque-là figées à des valeurs par défaut). Bornes identiques à Android
+  (`MIN/MAX_FONT_SIZE_SP` 10-32, `MIN/MAX_MARGIN_DP` 0-200 pas 4,
+  `MIN/MAX_LINE_SPACING` 0.8-3.0 pas 0.1), sp/dp Android devenant simplement
+  des px. **Adaptation, pas portage littéral** : la liste `EDITOR_FONTS`
+  d'Android est composée d'alias de familles de police *Android*
+  (`sans-serif-condensed`, etc.) qui ne veulent rien dire en CSS — remplacée
+  par une liste de vraies familles CSS (`settings.js`, même esprit : une
+  poignée de choix monospace/sans-serif/serif, pas un gestionnaire de
+  polices personnalisées). Persistés en IndexedDB **et** dans le
+  `zettelium.ini` durable (`ini.js` étendu avec les types `int`/`float`,
+  jusque-là seulement `str`/`bool`).
+
+**Tests** : 95 (`make test`, +1 pour le round-trip INI int/float des
+réglages de typographie). Les icônes/steppers de réglages touchent tous le
+DOM, non testables en Node — vérifié à la place que chaque SVG produit par
+`icons.js` est un XML bien formé (aucune coquille de tracé/attribut), et que
+les IDs référencés en JS existent tous dans `template.html`. **Non vérifié
+visuellement en conditions réelles** (rendu effectif des icônes/de la
+typographie dans un navigateur) — même limite que toutes les phases/rounds
+précédents.
+
+**Round 8 (2026-07-14) — comblement des écarts majeurs identifiés par
+comparaison directe avec zettelium-android** (voir mémoire
+`project_zettelium_web_gaps.md`, cinq lacunes qualifiées de fonctionnalité
+de base, pas de polish) :
+- **Créer une nouvelle note** : bouton "+" dans la barre du navigateur
+  (à côté de "réparer les liens"), crée dans le dossier actuellement
+  affiché (`currentDirHandle()`), ouvre directement dans l'éditeur — même
+  comportement qu'Android round 10 ("contrairement à writhdeck-android,
+  qui ne fait que rafraîchir la liste"). `FSA.createNoteFile` ajoute la
+  première extension configurée si le nom saisi n'en porte pas déjà une
+  reconnue, même règle que le renommage. Garde-fou supplémentaire (pas
+  d'équivalent Android explicite) : refuse si un fichier de même nom existe
+  déjà dans le dossier courant, plutôt que de silencieusement réutiliser/
+  écraser le handle existant (`getFileHandle(..., {create:true})` renvoie
+  le handle existant sans le vider — seule une écriture l'écraserait).
+- **Supprimer / renommer / déplacer une note depuis le navigateur** :
+  pas d'équivalent web au clic long Android — chaque ligne de fichier a
+  maintenant un petit bouton "⋮" (`file-item-actions-btn`, `stopPropagation`
+  pour ne pas déclencher l'ouverture de la note) ouvrant un menu
+  Renommer/Déplacer/Supprimer, même ordre que `fileForActions`
+  (`BrowserScreen.kt`). Suppression = `confirm()` natif (cohérent avec le
+  reste de l'app, ex. retrait d'un dépôt) puis réindexation complète du
+  dépôt (projection reconstructible, pas de purge ciblée). Renommer depuis
+  le navigateur est un chemin **distinct** du renommage déjà existant côté
+  éditeur (`editor.js`'s `confirmRename`, qui renomme la note *actuellement
+  ouverte*) — mêmes IDs de dialogue évités exprès (`note-rename-dlg` vs
+  `rename-note-dlg`) pour ne pas faire porter deux gestionnaires
+  d'événements différents sur les mêmes éléments.
+- **Déplacer une note (sous-dossier ou autre dépôt)** : `note-move-dlg`,
+  porté de `MoveNoteDialog.kt` — sélecteur de dépôt destination (masqué
+  s'il n'y en a qu'un), navigation dans son arborescence (".." + sous-
+  dossiers, `Icons.folder()` par ligne — seule vue de cette app à afficher
+  une icône de dossier, réplique fidèle de l'apparence réelle de ce
+  dialogue précis chez Android, ne pas généraliser au navigateur principal
+  qui reste volontairement sans icône de dossier), bouton "Déplacer ici"
+  désactivé si la cible = emplacement actuel. **Détail de fidélité
+  délibérément reproduit** : comme Android, le dialogue démarre TOUJOURS à
+  la racine du dépôt sélectionné, jamais au dossier actuellement parcouru
+  — naviguer jusqu'au dossier déjà affiché désactive alors le bouton,
+  sinon "Déplacer ici" est actif dès l'ouverture si la racine diffère du
+  dossier courant. Implémenté en copie (`FSA.writeNewFile` vers la
+  destination) PUIS suppression de la source seulement après écriture
+  réussie — jamais l'inverse — même précaution qu'Android
+  (`moveNote`/`MoveOutcome`, pas d'équivalent FSA à
+  `DocumentsContract.moveDocument`, de toute façon non fiable entre deux
+  arborescences distinctes côté Android non plus). Réindexe le dépôt
+  source ET destination (réindexation unique si c'est le même dépôt).
+- **Détection de modification externe** : `_baselineMtime` (mtime réel du
+  `FileSystemFileHandle` au moment de l'ouverture/dernière écriture),
+  comparé avant chaque sauvegarde ET au retour de focus de l'onglet/fenêtre
+  (`window.addEventListener('focus', ...)` +
+  `document.visibilitychange` — équivalent web le plus proche de
+  `LifecycleEventEffect(ON_RESUME)`, un navigateur n'ayant pas de notion de
+  "reprise d'application"). Sans modification locale non enregistrée :
+  rechargement silencieux depuis le disque (rien à perdre, `reloadFromDisk`
+  réindexe aussi la note rechargée). Avec modification locale en cours :
+  dialogue `external-conflict-dlg` à trois choix (Écraser/Recharger/
+  Annuler), même pattern Promise-based que `confirmSaveBeforeClose`
+  existant. Garde `_checkingExternal` contre un chevauchement focus+save.
+- **Position du curseur restaurée à l'ouverture d'une note** : nouvel
+  object store IndexedDB `cursors` (`storage.js`, `DB_VER` 1 → 2, migration
+  additive non destructive — `onupgradeneeded` ne touche que les stores
+  manquants), clé `${repositoryId}::${path}` → offset de caractère, même
+  raisonnement qu'Android `NoteCursorStore.kt` ("offset de caractère, pas
+  ligne/colonne — la contrainte ligne/colonne d'un moteur externe ne
+  s'applique pas ici non plus qu'à zettelium-android lui-même", cette
+  appli travaillant directement sur une `string` JS). Sauvegardée en
+  quittant la note (`close()`) et implicitement à chaque changement de note
+  affichée (`open()` sauvegarde d'abord la position de la note
+  précédente si l'éditeur était déjà ouvert) — jamais en continu, même
+  déclenchement ponctuel qu'Android (`onDispose`). Repli sur la fin du
+  contenu si aucune position connue (comportement historique conservé,
+  même repli qu'Android). Réutilise la technique du mirror-div déjà en
+  place (`pixelTopForOffset`, TOC round 7) pour faire défiler jusqu'à la
+  position restaurée.
+
+**Tests** : 95 (`make test`, inchangé — tout ce round touche FSA/IndexedDB/
+DOM, comme les rounds précédents de cette nature ; aucune nouvelle fonction
+pure ajoutée à porter aux tests `eval()`-based existants). Vérifié :
+`node --check` sur les 5 fichiers touchés, `make clean && make` (0 espace
+réservé `{{...}}` restant), cross-check de tous les `getElementById(...)`
+JS contre les `id="..."` de `template.html` (aucun manquant). **Non testé
+fonctionnellement dans un navigateur réel** (même limite IndexedDB/Chrome
+headless que documentée en début de session) — en particulier la
+détection de modification externe (dépend du timing réel focus/mtime du
+système de fichiers) et le dialogue de déplacement, à confirmer par
+l'utilisateur.
+
+**Round 9 (2026-07-14) — unification des réglages web/Android + i18n
+complet** : demande explicite ("il faut pouvoir entrer une valeur... faire
+pareil pour la version android... il faudra unifier les réglages des 2
+modes"), avec un ordre de section précis fourni par l'utilisateur. Voir
+aussi `zettelium-android/CLAUDE.md` round 23 pour le miroir côté Android.
+- **Saisie numérique directe** (taille de police, marges, interligne) :
+  `wireStepper()` (settings.js) gère maintenant un vrai `<input
+  type="number">` (plus un `<span>` en lecture seule) — validé sur
+  `change` (blur/Entrée), clampé aux mêmes bornes que les boutons -/+.
+  Flèches natives du navigateur masquées en CSS (redondantes avec les
+  boutons existants).
+- **Thème passé d'un booléen `darkMode` à un mode tri-état
+  `themeMode`** ('system'/'light'/'dark', aligné sur l'énum `ThemeMode`
+  d'Android) : `resolveDarkMode()` (app.js) résout 'system' via
+  `window.matchMedia('(prefers-color-scheme: dark)')`, avec un listener de
+  changement en direct (l'OS peut changer de thème pendant que l'app est
+  ouverte, sans recharger la page). Réglage exposé comme 3 boutons radio
+  (Système/Clair/Sombre), même wiring générique (`wireRadioGroup`/
+  `syncRadioGroup`) réutilisé pour la langue ci-dessous. `ini.js` :
+  `dark_mode` (bool) remplacé par `theme_mode` (str) — pas de shim de
+  compatibilité (aucune donnée réelle utilisateur documentée sur un
+  `zettelium.ini` existant à ce stade du projet).
+- **Réordonnancement des sections Réglages** pour correspondre exactement à
+  l'ordre demandé et au nouvel ordre Android (round 23) : **Thème** (mode +
+  palette + aperçu + "Modifier les couleurs" — déplacé ici depuis Éditeur)
+  → **Éditeur** (police/taille/marges/interligne) → **Langue** (nouveau) →
+  **Fichiers** → **Zettelkasten**.
+- **Internationalisation FR/EN complète** (nouveau `src/i18n.js`, 131 clés
+  `section.nom`, dictionnaires FR+EN strictement synchronisés) — port du
+  principe d'Android (`AppLanguage`, round 6 zettelium-android) mais
+  mécanisme différent : pas de ressources `strings.xml`/recréation
+  d'activité, un dictionnaire JS plat + balayage du DOM.
+  - `I18n.t(key, params)` : résout la langue effective (`State.settings
+    .language` = 'system'/'fr'/'en' ; 'system' retombe sur `navigator
+    .language`, anglais sinon français) et substitue les `{param}` dans la
+    chaîne.
+  - `I18n.apply()` : balaie `[data-i18n]`/`[data-i18n-title]`/
+    `[data-i18n-placeholder]` dans `template.html` (contenu STATIQUE —
+    tous les libellés de sections/boutons/dialogues) et émet un évènement
+    `i18n:apply` sur `document`.
+  - Le contenu généré dynamiquement (labels icône+texte construits en JS,
+    listes actuellement affichées, aperçus) n'est PAS couvert par le
+    balayage : chaque module (browser.js/editor.js/repositories.js/
+    theme-editor.js/settings.js) écoute `i18n:apply` et se rafraîchit
+    lui-même via sa propre fonction `refreshI18nLabels()`/`render()` —
+    couplage volontairement plus léger qu'un sweep DOM générique pour ce
+    contenu-là.
+  - **Volontairement non traduits** (même choix qu'Android) : le nom
+    "Zettelium", les noms de police génériques (Monospace/Sans-serif/
+    Serif/Cursive — identiques ou quasi dans les deux langues), les noms
+    de palettes de couleurs (solarized/nord/gruvbox/...), et les noms de
+    langue eux-mêmes dans le sélecteur ("Français"/"English" toujours
+    affichés dans leur propre langue, jamais traduits — `AppLanguage
+    .nativeLabel` côté Android).
+  - `I18n.locale()` (fr-FR/en-US) utilisée par les formatages de date
+    (`toLocaleString`) qui existaient déjà (liste des sauvegardes) — la
+    langue choisie dans l'app doit aussi changer le format de date, pas
+    seulement la langue système, même esprit qu'Android.
+  - Nouveau réglage `State.settings.language`, section Réglages > Langue
+    (3 boutons radio), persisté en IndexedDB et dans `zettelium.ini`
+    (`language`, type `str`).
+- Correctif de test au passage : `INI.parse round-trips what INI.stringify
+  wrote` et `INI.stringify omits settings that are undefined` référençaient
+  encore l'ancienne clé `darkMode`/`dark_mode` — mis à jour vers
+  `themeMode`/`theme_mode`.
+
+`make clean && make` (0 espace réservé restant), cross-check de tous les
+`getElementById(...)` JS contre `template.html` (aucun manquant),
+vérification croisée que les 70 clés `data-i18n*` utilisées dans
+`template.html` existent bien dans le dictionnaire FR et que FR/EN portent
+exactement les 131 mêmes clés (script Node jetable, pas conservé). `make
+test` passe (95/95, 2 corrigés). **Non testé visuellement dans un
+navigateur réel** (limite habituelle de cet environnement) — en
+particulier le changement de langue en direct (bascule Système/Français/
+English pendant que plusieurs écrans/dialogues sont déjà affichés) et la
+réaction au changement de thème système pendant que l'app est ouverte.
+
+**Round 10 (2026-07-14) — sauvegarde automatique + interrupteurs à bascule
+style Android** : deux demandes liées.
+- **Sauvegarde automatique** (`State.settings.autosaveEnabled`, défaut
+  `false` — même décision qu'Android round 3, "cela sauvegarde
+  régulièrement... n'est pas souhaité") : porté d'`EditorViewModel
+  .scheduleAutosave()` après recherche exacte du mécanisme Android
+  (agent dédié, pour ne pas deviner un timing) — **vrai debounce de 2000ms**
+  (`AUTOSAVE_DELAY_MS`), pas un intervalle fixe : chaque frappe
+  (`onInput()` → `scheduleAutosave()`) annule le minuteur en attente et en
+  reprogramme un nouveau, donc l'enregistrement ne se déclenche qu'après 2s
+  d'inactivité. Appelle exactement le même `save()` que le bouton manuel
+  (donc soumis à la même détection de modification externe, pas de chemin
+  simplifié) — `save()` annule lui-même tout minuteur en attente en premier
+  (`cancelAutosave()`), pour qu'une sauvegarde manuelle ne se fasse jamais
+  doubler par un autosave venant de se déclencher juste après. Annulé aussi
+  explicitement avant un renommage (`confirmRename`) et à la fermeture de
+  l'éditeur (`close()`) — même précaution qu'Android
+  (`EditorViewModel.renameNote`, commentaire : "sinon un autosave en
+  attente peut se déclencher... et écrire sur une baselineMtime/URI
+  devenue périmée"). Réglage exposé dans Réglages > Éditeur (juste après
+  l'interligne, même emplacement qu'Android round 23), persisté en
+  IndexedDB et dans `zettelium.ini` (`autosave_enabled`, bool).
+- **Interrupteurs à bascule (style Android `Switch`)** : demande explicite
+  ("met le label en premier et la coche ensuite, sur la même ligne...
+  mettre une sorte de slider comme sous Android") pour la case "Tous les
+  fichiers (ignorer le filtre)", étendue par cohérence à TOUTES les cases à
+  cocher de réglage (Android utilise `Switch` partout pour ses booléens,
+  vérifié dans `BrowserScreen.kt`/`SettingsScreen.kt` avant de généraliser)
+  : nouveau composant CSS `.switch`/`.switch-track` (une vraie `<input
+  type="checkbox">` cachée sous un rendu visuel de piste+curseur — le JS de
+  changement existant continue de fonctionner sans modification, seul le
+  rendu diffère d'une case native). Appliqué à `settings-extensions-all`,
+  `repo-options-include-extension`, et le nouveau `settings-autosave`.
+  Au passage, ajout des textes de description qui existaient déjà côté
+  Android pour ces trois réglages mais n'avaient jamais été portés côté web
+  (`settings.extensionsAllDesc`, `browser.includeExtensionDesc`,
+  `settings.autosaveDesc` — textes repris tels quels de
+  `strings.xml`/`values-en/strings.xml` pour la fidélité) ; au passage,
+  corrigé `browser.includeExtensionLabel` qui portait un suffixe `[[…]]`
+  ajouté par erreur lors d'un round précédent, absent du libellé Android
+  réel ("Inclure l'extension dans les liens").
+- 4 nouvelles clés i18n × 2 langues (135 au total, toujours strictement
+  synchronisées FR/EN). `make clean && make`, cross-check des IDs,
+  vérification que les 74 clés `data-i18n*` utilisées résolvent toutes,
+  `make test` (95/95, inchangé — ce round ne touche aucune logique pure).
+  **Non testé visuellement dans un navigateur réel.**
+
+**Round 11 (2026-07-14) — panneau TOC latéral épinglable, sur le modèle de
+writhdeck-web** : demande explicite ("rajoute une option (désactivable)
+permettant d'afficher le TOC à droite... au lieu d'en surimpression
+temporaire... un mode 'pin'... pour le coller ou le décoller"). Envoyé un
+agent lire `writhdeck-web/src/toc.js`/`style.css`/`app.js` avant
+d'implémenter plutôt que de deviner — découverte importante qui a
+recadré la conception : **writhdeck-web n'a pas deux modes de mise en page**
+(surimpression vs panneau) — son panneau `#toc-panel` est *toujours* une
+colonne flex (`display:none`↔`flex`, jamais de position absolue/flottante).
+Son "pin" ne contrôle qu'une chose : si un clic sur un titre referme le
+panneau ensuite ou non — ce n'est même pas un réglage persistant, juste une
+variable de fermeture JS qui retombe à `false` au rechargement. zettelium-web
+n'avait jusqu'ici que le mode fenêtre modale `<dialog>` ; le "choix entre
+les deux" que l'utilisateur demande est donc une combinaison propre à ce
+port (l'option bascule bien réellement entre les deux mises en page,
+contrairement à writhdeck qui n'en a qu'une), le comportement du pin lui
+étant repris à l'identique de writhdeck (contrôle l'auto-fermeture après
+clic, état de session non persisté).
+- **Nouveau réglage `State.settings.tocSidebarMode`** (bool, défaut `false`
+  — conserve le comportement historique tant qu'on ne l'active pas),
+  Réglages > Éditeur, interrupteur style Switch (round 10) avec
+  description. Persisté en IndexedDB et `zettelium.ini`
+  (`toc_sidebar_mode`).
+- **`#ed-body` restructuré en ligne flex** : les anciens enfants
+  absolument positionnés (`#ed-wrap`/`#ed-preview`, bascule édition/aperçu)
+  déplacés dans un nouveau `#ed-main` (`flex:1; position:relative`, reprend
+  le rôle que jouait `#ed-body` seul avant ce round) ; `#toc-panel`
+  (nouveau, `width:240px; flex-shrink:0`) devient le second enfant flex de
+  `#ed-body` — l'affichage du panneau rétrécit donc réellement la colonne
+  de l'éditeur, ce n'est jamais une surimpression, exactement le
+  comportement demandé et celui de writhdeck-web.
+- **`renderTocList(container, onNavigate)`** (nouveau, editor.js) factorise
+  la construction des lignes de titres, partagée entre `openTocDialog()`
+  (comportement historique inchangé) et `openTocSidebar()` (nouveau) — même
+  fonction `navigateToToc()` derrière les deux, aucune duplication de la
+  logique de défilement édition/aperçu.
+- **`_tocPinned`** : variable de session pure dans `editor.js`, PAS dans
+  `State.settings` (fidélité délibérée à writhdeck-web — jamais persisté,
+  retombe à `false` à la fermeture de l'éditeur). Bouton épingle
+  (`Icons.pin()`, nouvelle icône dessinée à la main faute de glyphe simple
+  dans le sous-ensemble Feather déjà utilisé) dans l'en-tête du panneau,
+  stylé `.active` (couleur d'accent) quand épinglé — même logique de style
+  que le bouton pin de writhdeck (`.toc-pin-btn.active`), pas de changement
+  d'icône, seulement de couleur.
+- Ouvrir une autre note pendant que le panneau est déjà affiché (lien
+  suivi, backlink) rafraîchit son contenu pour la nouvelle note au lieu de
+  laisser des titres périmés visibles — cas non couvert par writhdeck-web
+  (pas de navigation lien-à-lien là-bas) mais nécessaire ici. Fermer
+  l'éditeur masque le panneau et réinitialise l'épinglage sans condition
+  (même choix que writhdeck-web : "Closing the document forcibly hides it,
+  ignores pin").
+- 4 nouvelles clés i18n × 2 langues (139 au total, toujours strictement
+  synchronisées). `make clean && make`, cross-check des IDs, vérification
+  que les 76 clés `data-i18n*` résolvent, `make test` (95/95, inchangé).
+  **Non testé visuellement dans un navigateur réel** — en particulier le
+  redimensionnement réel de la colonne éditeur à l'ouverture/fermeture du
+  panneau, et le comportement du pin en combinaison avec la bascule
+  aperçu/édition.
+
+**Round 12 (2026-07-14) — retrait du mode "épingle" du panneau TOC** :
+retour immédiat de l'utilisateur sur le round 11 ("le pin... ne sert à
+rien, on peut retirer facilement en cliquant sur l'icône"). Retiré
+entièrement : `_tocPinned`, `toggleTocPin()`, `updateTocPinButton()`
+(editor.js), le bouton `#toc-panel-pin-btn` (template.html/style.css),
+l'icône `Icons.pin()` (devenue inutilisée, supprimée plutôt que laissée en
+code mort) et les 2×2 clés i18n `editor.tocPin`/`editor.tocUnpin`. Le
+panneau latéral est maintenant **persistant par défaut** : un clic sur un
+titre navigue sans jamais refermer le panneau ; seul le bouton "✕" (déjà
+existant) ou une nouvelle bascule via l'icône TOC de la barre d'outils le
+ferment. `openTocSidebar()` simplifié en conséquence (plus de branche
+conditionnelle sur un état épinglé). 137 clés i18n (FR/EN toujours
+synchronisées, -2 par rapport au round 11). `make clean && make`,
+cross-check des IDs, `make test` (95/95) — tous propres après retrait.
 
 ## Ne jamais faire
 
