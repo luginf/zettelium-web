@@ -4,6 +4,11 @@ A Zettelkasten note-taking app in [txt2tags](https://txt2tags.org/) syntax that 
 
 This is the web port of `zettelium-android`, built with the same single-file, no-bundler approach as [Writhdeck](https://github.com/luginf/writhdeck) (see [Build](#build)).
 
+## Try it online
+
+- https://luginf.github.io/zettelium-web/zettelium.html
+
+
 ## Features
 
 - **Multiple repositories**: each one is a real folder on your disk, opened via the File System Access API — no data lives anywhere but your own filesystem.
@@ -84,3 +89,5 @@ Nothing is sent to any server.
 ## Related projects
 
 Part of the same Zettelkasten app family as `zettelium-android` (the original Android app this is ported from) and `zettelium-tcl` (a planned Tcl/Tk desktop port).
+
+**Related project:** [WrithDeck](https://github.com/luginf/writhdeck) is a separate distraction-free text editor — not a Zettelkasten app, but a parallel project built the same way (single self-contained HTML file, no server, no bundler) and fully compatible with Zettelium's plain-text/txt2tags notes, so the same files can be opened and edited in either app.
