@@ -439,6 +439,15 @@ réelles**, même limite que documentée pour toutes les phases précédentes.
 - **Chromium uniquement** pour la gestion de dépôts (contrainte de la File
   System Access API) — assumé, pas de mode dégradé complexe pour
   Firefox/Safari.
+- **Brave désactive la File System Access API par défaut** (réglage propre
+  à Brave, réduction de la surface de fingerprinting — vérifié en
+  inspectant le binaire installé : `window.showDirectoryPicker` est
+  `undefined` par défaut, présent avec `--enable-features=FileSystemAccessAPI`).
+  Message d'erreur affiché par l'appli ("The File System Access API is not
+  available in this browser") identique à Firefox/Safari alors que la cause
+  est différente (réglage désactivable, pas une absence d'implémentation) —
+  piste à donner : `brave://flags/#file-system-access-api` → Enabled →
+  relancer Brave. Documenté dans README.md.
 - **Le parseur txt2tags est porté depuis `zettelium-android` (Kotlin)**, pas
   depuis writhdeck-web (qui n'en a pas de vrai) ni réécrit de zéro —
   `lionwiki-t2t/txt2tags.js` sert de cross-check pendant le portage, pas de
@@ -868,6 +877,120 @@ ferment. `openTocSidebar()` simplifié en conséquence (plus de branche
 conditionnelle sur un état épinglé). 137 clés i18n (FR/EN toujours
 synchronisées, -2 par rapport au round 11). `make clean && make`,
 cross-check des IDs, `make test` (95/95) — tous propres après retrait.
+
+**Round 13 (2026-07-14) — texte sélectionné visuellement décalé par rapport
+au texte non sélectionné** : signalé via capture d'écran ("le texte surligné
+est décalé par rapport au texte d'origine"). Diagnostiqué par reproduction
+en Chrome headless avec le vrai `highlight.js`/`style.css`/`app.js`
+(mesure pixel par pixel des bandes de texte, pas de simple relecture de
+code) :
+- **Cause réelle** : `#ed-input::selection { color: var(--fg) }` rend
+  visibles les *propres* glyphes du `<textarea>` réel pour la portion
+  sélectionnée (nécessaire sinon un fond de sélection opaque masquerait
+  totalement le texte de l'overlay en dessous). Or le `<textarea>` et le
+  `<pre>` `#ed-highlight`, même avec un CSS strictement identique, n'ont
+  pas exactement la même hauteur de ligne dès qu'une ligne de titre
+  précédente est agrandie (`hl-h1`..`hl-h4`, `font-size` en `em`) : la
+  boîte de ligne du titre dans l'overlay peut être de 1 à quelques px plus
+  haute que ce que son `line-height` `calc()` compensé prévoit sur le
+  papier, à cause des métriques réelles de la police (ascendant/descendant)
+  à cette taille de police précise — le `<textarea>`, lui, ne peut de toute
+  façon rendre AUCUNE ligne plus haute qu'une autre (pas de style par
+  ligne dans un contrôle de formulaire natif). Confirmé par mesure directe
+  (`getBoundingClientRect().height`) : un `.hl-line` contenant un `hl-h2`
+  (agrandissement ×1.6) avec un `line-height` calculé pour valoir
+  exactement 24px mesure en réalité 26px. Ce léger surplus s'accumule après
+  chaque titre traversé, et devient visible **uniquement** là où
+  `::selection` révèle les glyphes du textarea (qui restent, eux, sur les
+  positions non affectées par ce surplus) — d'où l'impression que "le texte
+  sélectionné" spécifiquement est décalé.
+- **Piste explorée et écartée** : compenser plus rigoureusement le
+  `line-height` des titres (`--ed-line-height-px` calculé en JS plutôt que
+  `calc()`) ne change rien à la mesure (`getBoundingClientRect` identique
+  avant/après) — la dérive vient des métriques de police à la taille
+  agrandie, pas d'un arrondi de calcul CSS. Forcer `height` fixe +
+  `overflow:hidden` sur `.hl-line` supprime bien la dérive mais **rogne
+  visiblement les glyphes** dès `hl-h1` (×1.8) — inacceptable. `transform:
+  scale()` (n'affecte pas la mise en page, donc aucune dérive) a été testé
+  aussi mais fait chevaucher visuellement le titre agrandi sur la ligne
+  suivante sans retouche supplémentaire de marges — pas retenu ici.
+- **Premier correctif (incomplet) et régression signalée par l'utilisateur** :
+  ne plus jamais rendre visibles les glyphes du `<textarea>` lui-même —
+  `#ed-input::selection` sans `color` (texte transparent même sélectionné),
+  fond de sélection rendu translucide (`rgba(var(--bg-sel-rgb), 0.65)`)
+  plutôt qu'opaque, pour laisser transparaître le texte de l'overlay en
+  dessous. Corrigeait bien l'alignement, mais l'utilisateur a signalé que le
+  texte sélectionné apparaissait "recouvert"/plus clair — cause : ce fond
+  translucide est peint PAR-DESSUS les glyphes déjà rendus de l'overlay
+  (`#ed-input` a `z-index:1`, au-dessus de `#ed-highlight`), donc il les
+  délave au lieu de servir de fond DERRIÈRE eux comme le fait une vraie
+  sélection de texte (fond peint d'abord, glyphe peint par-dessus, pleine
+  opacité).
+- **Pourquoi ni vu ni signalé côté writhdeck-web** : vérifié — l'agrandissement
+  des titres dans l'éditeur (`hl-h1`..`hl-h4`, la cause racine de toute la
+  dérive) y est un réglage **désactivé par défaut**
+  (`State.settings.headingSizes = false`, `state.js`), gating CSS via une
+  classe `.heading-sizes` posée seulement si l'utilisateur l'active
+  (`app.js`). zettelium-web, en portant le modèle d'affichage d'Android
+  ("titre → classe de taille", `SyntaxHighlighting.kt`), a rendu cet
+  agrandissement **permanent, sans réglage** — d'où une exposition
+  systématique à ce bug ici, contrairement à writhdeck-web où il faut
+  explicitement activer un réglage rarement touché pour même pouvoir le
+  déclencher. Le bug existe probablement aussi côté writhdeck-web dès que
+  `heading_sizes = true`, mais non vérifié ni corrigé dans cette session
+  (hors périmètre, pas demandé).
+- **Fix définitif** : la sélection visible n'est plus du tout celle du
+  `<textarea>` réel — `#ed-input::selection` devient totalement invisible
+  (`background: transparent; color: transparent`), et la sélection est
+  reconstruite comme un `Highlight` (**CSS Custom Highlight API**,
+  `CSS.highlights`/`Highlight`/`Range` — Chromium seulement, cohérent avec
+  la contrainte déjà assumée pour la File System Access API) posé
+  directement sur le texte du `<pre>` #ed-highlight lui-même
+  (`editor.js` : `domPositionForOffset()` convertit un offset de caractère
+  du texte brut en `{node, offset}` DOM en parcourant les nœuds texte du
+  pre via `TreeWalker` — leur concaténation en ordre de document reconstruit
+  exactement le texte brut, `Highlight.highlight()` n'ajoutant/ne retirant
+  jamais de caractère à l'intérieur d'une ligne ; `updateSelectionHighlight()`
+  construit un `Range` entre les deux positions et l'enregistre via
+  `CSS.highlights.set('ed-selection', new window.Highlight(range))`).
+  Résultat : le fond ET les glyphes sont peints dans la MÊME passe sur le
+  MÊME texte (celui de l'overlay, jamais décalé par rapport à lui-même) —
+  texte net, pleine opacité, alignement garanti quelle que soit la dérive
+  résiduelle overlay/textarea. Écouteur `document.addEventListener
+  ('selectionchange', ...)` filtré à `document.activeElement === ta()`
+  (couvre glisser-déposer, clavier+Maj, sélectionner tout, en un seul point) ;
+  effacé sur `blur` et dans `close()`. `updateSelectionHighlight()` aussi
+  rappelée à la fin de `rehighlight()` (les nœuds DOM sont recréés à chaque
+  frappe, un `Range` sur d'anciens nœuds détachés serait silencieusement
+  invalide). **Repli explicite** pour un navigateur sans l'API
+  (`.custom-highlight-supported`, classe posée sur `<html>` par `app.js`
+  init() selon `!!(window.CSS && CSS.highlights)`) : le fond de sélection
+  natif translucide (le "premier correctif") reste actif dans ce cas — pas
+  parfait mais mieux que rien.
+- **Piège rencontré pendant l'implémentation** : `new Highlight(range)`
+  levait `TypeError: Highlight is not a constructor`. Cause : ce fichier
+  (`highlight.js`) déclare déjà un `const Highlight = (() => {...})()` de
+  plus haut niveau (le module de coloration syntaxique, `Highlight.highlight
+  (text)`) — dans le scope global partagé de ce projet (pas de modules ES,
+  tout concaténé par `build.py`), cette déclaration masque le constructeur
+  natif `Highlight` de la CSS Custom Highlight API pour tout bare-identifier
+  `Highlight` référencé ailleurs dans le fichier. Corrigé en écrivant
+  explicitement `new window.Highlight(range)` (contourne le masquage lexical
+  en passant par la propriété de l'objet global). Piège à surveiller pour
+  toute future utilisation de la CSS Custom Highlight API dans ce fichier ou
+  un fichier chargé après lui.
+- Diagnostiqué et vérifié par reproduction en Chromium headless avec le vrai
+  `highlight.js`/`style.css`/`app.js`/`editor.js` (mesure pixel par pixel des
+  bandes de texte, pas de simple relecture de code) — `google-chrome`
+  installé ici est une v99 trop ancienne pour la CSS Custom Highlight API
+  (support Chromium depuis la v105) et ne pouvait valider que le repli ;
+  `brave-browser` (Chromium 149 dans cet environnement) a servi à valider le
+  chemin `CSS.highlights` réel. Après fix : bandes de texte identiques de
+  part et d'autre de la frontière de sélection, texte net (pas délavé) dans
+  les deux cas.
+- `make clean && make`, `make test` (95/95, inchangé — aucune logique pure
+  touchée ; `updateSelectionHighlight()`/`domPositionForOffset()` touchent
+  le DOM réel, non testables dans la suite Node existante).
 
 ## Ne jamais faire
 

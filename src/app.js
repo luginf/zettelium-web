@@ -15,6 +15,13 @@ function resolveDarkMode(themeMode) {
   return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
 }
 
+// #rrggbb -> "r, g, b" (pour composer une couleur translucide via rgba() en
+// CSS, voir --bg-sel-translucent ci-dessous).
+function hexToRgbTriplet(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
 function applyTheme(schemeName = 'default', themeMode = 'system') {
   const s = getScheme(schemeName);
   const darkMode = resolveDarkMode(themeMode);
@@ -25,6 +32,7 @@ function applyTheme(schemeName = 'default', themeMode = 'system') {
   root.setProperty('--bg-bar',  pick('bgBar'));
   root.setProperty('--fg-bar',  pick('fgBar'));
   root.setProperty('--bg-sel',  pick('bgSel'));
+  root.setProperty('--bg-sel-rgb', hexToRgbTriplet(pick('bgSel')));
   root.setProperty('--heading', pick('heading'));
   root.setProperty('--comment', pick('comment'));
   root.setProperty('--markup',  pick('markup'));
@@ -46,6 +54,12 @@ function applyEditorTypography() {
 }
 
 async function init() {
+  // Utilisée par editor.js pour peindre la sélection comme un `Highlight`
+  // (CSS Custom Highlight API) sur l'overlay plutôt que via `::selection` du
+  // vrai textarea — voir le commentaire de `#ed-input::selection` dans
+  // style.css. Chromium seulement (support depuis 2022), cohérent avec la
+  // contrainte déjà assumée pour la File System Access API.
+  document.documentElement.classList.toggle('custom-highlight-supported', !!(window.CSS && CSS.highlights));
   applyTheme(); // default palette immediately, no flash while loadState() (IndexedDB) is in flight
   if (!FSA.supported()) {
     document.getElementById('repo-support-hint').textContent = I18n.t('repo.fsaUnsupportedHint');

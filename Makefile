@@ -8,13 +8,20 @@ JS_SRCS := src/schemes.js src/icons.js src/i18n.js src/storage.js src/fsa.js \
            src/repositories.js src/settings.js src/theme-editor.js \
            src/browser.js src/editor.js src/app.js
 
-.PHONY: all clean test
+.PHONY: all debug clean test
 
-all: zettelium.html
-
-zettelium.html: src/template.html src/style.css $(JS_SRCS) build.py
+# Minified by default (production export). Always rebuilds — zettelium.html
+# is not used as a make prerequisite so `make` reliably overwrites whatever
+# `make debug` last left in place, regardless of file mtimes.
+all:
 	python3 build.py > zettelium.html
-	@echo "Built zettelium.html ($$(wc -c < zettelium.html) bytes)"
+	@echo "Built zettelium.html (minified, $$(wc -c < zettelium.html) bytes)"
+
+# Unminified, same output filename — for debugging in the browser devtools.
+# Run `make` again once done to restore the minified version before shipping.
+debug:
+	python3 build.py --debug > zettelium.html
+	@echo "Built zettelium.html (debug/unminified, $$(wc -c < zettelium.html) bytes)"
 
 test:
 	node test/run.js

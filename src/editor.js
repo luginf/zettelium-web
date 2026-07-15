@@ -160,6 +160,54 @@ const Editor = (() => {
   function rehighlight() {
     pre().innerHTML = Highlight.highlight(ta().value);
     syncGutter();
+    updateSelectionHighlight();
+  }
+
+  // Trouve le (nœud texte, offset local) du pre #ed-highlight correspondant
+  // à un offset de caractère dans le texte BRUT (celui de ta().value). Les
+  // nœuds texte du pre, parcourus dans l'ordre du document, reconstruisent
+  // exactement ce texte brut caractère pour caractère (Highlight.highlight()
+  // enveloppe des sous-chaînes dans des <span>, il n'ajoute/ne retire jamais
+  // de caractère à l'intérieur d'une ligne — le seul surplus est un '\n'
+  // final artificiel après la dernière ligne, hors de portée des offsets de
+  // sélection réels puisque toujours <= ta().value.length).
+  function domPositionForOffset(offset) {
+    const walker = document.createTreeWalker(pre(), NodeFilter.SHOW_TEXT);
+    let remaining = offset;
+    let node, last = null;
+    while ((node = walker.nextNode())) {
+      last = node;
+      const len = node.textContent.length;
+      if (remaining <= len) return { node, offset: remaining };
+      remaining -= len;
+    }
+    return last ? { node: last, offset: last.textContent.length } : null;
+  }
+
+  // Peint la sélection comme un `Highlight` (CSS Custom Highlight API) sur
+  // le texte du pre plutôt que de compter sur `::selection` du vrai
+  // textarea — voir le commentaire de `#ed-input::selection` dans
+  // style.css pour le pourquoi (alignement + contraste du texte
+  // sélectionné). Sur un navigateur sans l'API, ne fait rien : le repli CSS
+  // (fond de sélection natif translucide) prend le relais tout seul.
+  function updateSelectionHighlight() {
+    if (!window.CSS || !CSS.highlights) return;
+    const input = ta();
+    const { selectionStart: start, selectionEnd: end } = input;
+    if (start === end) { CSS.highlights.delete('ed-selection'); return; }
+    const from = domPositionForOffset(start);
+    const to = domPositionForOffset(end);
+    if (!from || !to) { CSS.highlights.delete('ed-selection'); return; }
+    const range = new Range();
+    range.setStart(from.node, from.offset);
+    range.setEnd(to.node, to.offset);
+    // `window.Highlight` explicitement : le module de coloration syntaxique
+    // de ce fichier déclare déjà un `const Highlight` de plus haut niveau
+    // (voir highlight.js) qui masque, dans ce scope global partagé (pas de
+    // modules ES — voir build.py), le constructeur natif `Highlight` de la
+    // CSS Custom Highlight API — `new Highlight(...)` résoudrait sur l'objet
+    // module (pas une classe) et lèverait "Highlight is not a constructor".
+    CSS.highlights.set('ed-selection', new window.Highlight(range));
   }
 
   // Compensates for the textarea's scrollbar width so both elements wrap
@@ -381,6 +429,7 @@ const Editor = (() => {
     _dirty = false;
     _previewMode = false;
     _baselineMtime = null;
+    if (window.CSS && CSS.highlights) CSS.highlights.delete('ed-selection');
     hideTocSidebar();
     el('editor-screen').hidden = true;
     el('browser-screen').hidden = false;
@@ -792,6 +841,16 @@ const Editor = (() => {
       }
     });
     window.addEventListener('resize', syncGutter);
+    // `selectionchange` couvre tous les cas (glisser-déposer, clavier avec
+    // Maj, sélectionner tout, ...) en un seul listener — filtré à quand le
+    // textarea a le focus pour ne pas répondre aux sélections ailleurs dans
+    // l'appli (ex. un champ de recherche).
+    document.addEventListener('selectionchange', () => {
+      if (document.activeElement === ta()) updateSelectionHighlight();
+    });
+    ta().addEventListener('blur', () => {
+      if (window.CSS && CSS.highlights) CSS.highlights.delete('ed-selection');
+    });
     el('ed-preview').addEventListener('click', onPreviewClick);
 
     el('zklink-filter').addEventListener('input', e => renderLinkPicker(e.target.value));

@@ -7,6 +7,7 @@
   --bg-bar:  #2a2a2a;
   --fg-bar:  #aaaaaa;
   --bg-sel:  #3a5a8a;
+  --bg-sel-rgb: 58, 90, 138;
   --heading: #c8a060;
   --comment: #606060;
   --markup:  #6aa9d4;
@@ -423,7 +424,28 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
   overscroll-behavior: contain;
   z-index: 1;
 }
-#ed-input::selection { background: var(--bg-sel); color: var(--fg); }
+/* La sélection visible n'est PAS la sélection native du textarea (voir
+   `editor.js` `updateSelectionHighlight()`) : elle est reconstruite comme un
+   `Highlight` (CSS Custom Highlight API) sur le texte du `<pre>`
+   #ed-highlight lui-même, peint DANS la même passe que les glyphes
+   (fond d'abord, glyphes par-dessus, comme toute sélection normale — texte
+   net, pleine opacité). Donner une couleur à `::selection` du vrai
+   `<textarea>` le rendrait visible avec SES propres métriques de police,
+   qui peuvent différer de quelques pixels de celles du `<pre>` dès qu'une
+   ligne de titre plus haut dans le texte est agrandie (le textarea ne peut
+   pas avoir une ligne plus haute qu'une autre) — texte sélectionné décalé
+   verticalement. Un essai intermédiaire (fond de sélection natif rendu
+   translucide plutôt que coloré) évitait le décalage mais "délavait" le
+   texte, car ce fond était peint PAR-DESSUS les glyphes déjà rendus de
+   l'overlay (z-index du textarea au-dessus du pre), pas en dessous.
+   `.custom-highlight-supported` (posée par app.js si `CSS.highlights`
+   existe — Chromium seulement, cohérent avec la contrainte déjà assumée
+   pour la File System Access API) rend alors la sélection native
+   totalement invisible ; en repli (navigateur sans l'API), on retombe sur
+   l'ancien fond translucide plutôt que rien du tout. */
+:root:not(.custom-highlight-supported) #ed-input::selection { background: rgba(var(--bg-sel-rgb), 0.65); }
+.custom-highlight-supported #ed-input::selection { background: transparent; color: transparent; }
+::highlight(ed-selection) { background-color: var(--bg-sel); }
 
 .hl-line { display: inline-block; width: 100%; min-height: 1lh; vertical-align: top; }
 .hl-heading { color: var(--heading); }

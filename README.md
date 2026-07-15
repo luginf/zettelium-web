@@ -36,6 +36,8 @@ make test   # runs the pure-logic test suite (Node.js, no browser needed)
 
 **Chromium-based browsers only** (Chrome, Edge, Brave, …). The File System Access API — the storage mechanism this app is built around, not an optional add-on — doesn't exist in Firefox or Safari. There is no degraded fallback mode.
 
+**Brave-specific**: Brave ships with the File System Access API disabled by default (its own privacy setting, unrelated to this app). If you see "The File System Access API is not available in this browser", go to `brave://flags/#file-system-access-api`, set it to Enabled, and relaunch Brave.
+
 ## Project structure
 
 ```
