@@ -22,6 +22,9 @@
   --ed-line-spacing: 1.5;
   --ed-margin-x: 40px;
   --ed-margin-y: 24px;
+
+  /* Liste de fichiers épinglée (round 19/19bis) */
+  --file-list-sidebar-width: 320px;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -131,6 +134,17 @@ input[type="text"], select {
   font-size: 0.75em;
   color: var(--fg-bar);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* `max-width` (pas juste `flex-shrink`) : sans plafond, ce bloc à
+     `flex-basis: auto` gagne la priorité de rétrécissement sur le nom
+     (`flex: 1`, `flex-basis: 0%` — presque rien à céder puisqu'il part
+     déjà de 0), au point de réduire le NOM à une largeur nulle et de ne
+     laisser voir que la date. Plafonné à 45 % de la ligne, le nom du
+     fichier — plus utile que la date — récupère toujours le reste (round
+     19bis, panneau redimensionnable sous la largeur du titre le plus long). */
+  flex: 0 1 auto;
+  max-width: 45%;
 }
 .folder-item { color: var(--heading); font-weight: 500; }
 .repo-item-reauth {
@@ -301,6 +315,60 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 #editor-screen[hidden] { display: none; }
 
+/* `#editor-note-view` reprend le rôle que jouait `#editor-screen` lui-même
+   avant le mode panneau épinglé (round 19) — nécessaire pour pouvoir
+   basculer vers `#editor-empty-state` sans jamais cacher `editor-screen`,
+   qui doit rester visible (donc garder sa largeur dans le layout épinglé
+   ci-dessous) même quand aucune note n'est ouverte. */
+#editor-note-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#editor-note-view[hidden] { display: none; }
+#editor-empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-bar);
+  text-align: center;
+  padding: 24px;
+}
+#editor-empty-state[hidden] { display: none; }
+
+/* ─── Liste de fichiers épinglée (settings.fileListSidebarMode, round 19) ──
+   Sur le modèle du panneau TOC (round 11) : une vraie colonne flex partagée
+   avec l'éditeur, jamais une surimpression. Contrairement au TOC, ce n'est
+   pas #ed-body qui se partage en deux — ce sont #browser-screen (devenu la
+   colonne de gauche) et #editor-screen (la zone principale) qui deviennent
+   deux enfants flex du <body> lui-même, activé seulement une fois une
+   première note ouverte (voir editor.js `open()`) et tant qu'on ne quitte
+   pas le dépôt (repositories.js `showList()` retire cette classe). */
+body.sticky-workspace-active { display: flex; flex-direction: row; }
+body.sticky-workspace-active #browser-screen {
+  flex: 0 0 var(--file-list-sidebar-width, 320px);
+  /* Pas de largeur minimale liée au contenu : `.file-item-name`/
+     `.file-item-meta` tronquent déjà avec une ellipse (voir plus bas), le
+     panneau peut donc être glissé plus étroit que le titre de la note la
+     plus longue (retour utilisateur explicite, round 19bis). */
+  min-width: 0;
+  overflow: hidden;
+}
+body.sticky-workspace-active #editor-screen { flex: 1 1 auto; min-width: 0; }
+
+/* Poignée de redimensionnement du panneau — round 19bis. N'existe (en
+   layout) que pendant que le panneau est réellement affiché à côté de
+   l'éditeur ; `display: none` par défaut, pas un simple `hidden` DOM, pour
+   ne jamais dépendre d'un état JS supplémentaire à synchroniser en plus
+   de `body.sticky-workspace-active` déjà géré par editor.js. */
+#file-list-sidebar-resizer { display: none; }
+body.sticky-workspace-active #file-list-sidebar-resizer {
+  display: block;
+  flex: 0 0 6px;
+  cursor: col-resize;
+  background: var(--bg-bar);
+}
+#file-list-sidebar-resizer:hover, #file-list-sidebar-resizer.resizing { background: var(--bg-sel); }
+
+.file-item-active { background: var(--bg-sel); }
+
 #ed-header {
   display: flex;
   align-items: center;
@@ -337,8 +405,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
    all with zero backlinks, matching zettelium-android). */
 .editor-badge[hidden] { display: none; }
 
-#editor-menu-wrap { position: relative; }
-#editor-menu {
+#editor-menu-wrap, #browser-menu-wrap { position: relative; }
+#editor-menu, #browser-menu {
   position: absolute;
   right: 0;
   top: 100%;
@@ -350,7 +418,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
   display: flex;
   flex-direction: column;
 }
-#editor-menu[hidden] { display: none; }
+#editor-menu[hidden], #browser-menu[hidden] { display: none; }
 #editor-menu button {
   display: block;
   text-align: left;
@@ -362,6 +430,19 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 #editor-menu button:hover { background: var(--bg-sel); }
 #editor-menu button[hidden] { display: none; }
+
+/* ─── In-note search bar (Ctrl+F / menu ⋮ "Rechercher") ─────────────────── */
+#ed-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: var(--bg-bar);
+  flex-shrink: 0;
+}
+#ed-search-bar[hidden] { display: none; }
+#ed-search-input { flex: 1; max-width: 260px; }
+#ed-search-count { font-size: 0.8em; color: var(--fg-bar); min-width: 90px; }
 
 /* `#ed-body` est une ligne flex (éditeur/aperçu + panneau TOC latéral en
    option, round 11) — le panneau, quand affiché, rétrécit réellement la
@@ -417,7 +498,13 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #ed-input {
   background: transparent;
   color: transparent;
-  caret-color: var(--fg);
+  /* transparent, pas var(--fg) : le caret natif utilise les métriques de
+     police UNIFORMES du textarea, qui divergent de l'overlay dès qu'un
+     titre plus haut dans le texte (taille agrandie) précède la ligne
+     courante — remplacé par #ed-caret ci-dessous, positionné via un Range
+     sur le texte réel de l'overlay (mêmes métriques que ce qui est
+     visuellement affiché). */
+  caret-color: transparent;
   resize: none;
   overflow-y: auto;
   overflow-x: hidden;
@@ -447,14 +534,59 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .custom-highlight-supported #ed-input::selection { background: transparent; color: transparent; }
 ::highlight(ed-selection) { background-color: var(--bg-sel); }
 
+/* Faux caret (remplace caret-color du vrai textarea, voir #ed-input plus
+   haut) — positionné en pixels via un Range sur le texte réel du pre
+   (`updateCaretIndicator()`, editor.js), donc toujours aligné avec ce qui
+   est visuellement affiché, y compris après un titre agrandi. */
+#ed-caret {
+  position: absolute;
+  width: 2px;
+  background: var(--fg);
+  pointer-events: none;
+  z-index: 2;
+  animation: ed-caret-blink 1s step-end infinite;
+}
+#ed-caret[hidden] { display: none; }
+@keyframes ed-caret-blink {
+  0%, 50%  { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* ─── Menu contextuel (clic droit) de formatage ─────────────────────────── */
+#ed-context-menu {
+  position: fixed;
+  background: var(--bg-bar);
+  border: 1px solid var(--fg-bar);
+  z-index: 100;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+}
+#ed-context-menu[hidden] { display: none; }
+#ed-context-menu .action-row[hidden] { display: none; }
+.ctx-glyph { display: inline-block; width: 18px; flex-shrink: 0; text-align: center; font-size: 0.85em; }
+
 .hl-line { display: inline-block; width: 100%; min-height: 1lh; vertical-align: top; }
 .hl-heading { color: var(--heading); }
-.hl-h1 { font-size: 1.8em; line-height: calc(var(--ed-line-spacing) / 1.8); }
-.hl-h2 { font-size: 1.6em; line-height: calc(var(--ed-line-spacing) / 1.6); }
-.hl-h3 { font-size: 1.4em; line-height: calc(var(--ed-line-spacing) / 1.4); }
-.hl-h4 { font-size: 1.2em; line-height: calc(var(--ed-line-spacing) / 1.2); }
+/* `.heading-sizes` (posée sur <html> par app.js/state.js selon
+   settings.headingSizesEnabled, activé par défaut) — l'agrandissement des
+   titres est LA cause racine des bugs de curseur/sélection décalés
+   (rounds 13/20/20bis) : le vrai textarea ne peut avoir qu'une seule
+   taille de police uniforme, donc toute mesure qui s'appuie sur SES
+   propres métriques (clic natif, navigation clavier ligne par ligne)
+   diverge de l'overlay dès qu'une ligne agrandie précède la ligne
+   courante. Round 20bis a corrigé le clic/le défilement/l'affichage un par
+   un ; ce réglage permet d'éliminer la cause à la source (garde la couleur
+   des titres via `.hl-heading` ci-dessus, jamais conditionnée) si les
+   correctifs ponctuels ne suffisaient pas — la navigation clavier
+   verticale, elle, n'a jamais été corrigée (hors round 20bis). */
+.heading-sizes .hl-h1 { font-size: 1.8em; line-height: calc(var(--ed-line-spacing) / 1.8); }
+.heading-sizes .hl-h2 { font-size: 1.6em; line-height: calc(var(--ed-line-spacing) / 1.6); }
+.heading-sizes .hl-h3 { font-size: 1.4em; line-height: calc(var(--ed-line-spacing) / 1.4); }
+.heading-sizes .hl-h4 { font-size: 1.2em; line-height: calc(var(--ed-line-spacing) / 1.2); }
 .hl-comment { color: var(--comment); }
 .hl-markup { color: var(--markup); }
+.hl-search { background: var(--bg-sel); }
 
 #ed-preview {
   position: absolute;
@@ -482,7 +614,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #ed-preview hr { border: none; border-top: 1px solid var(--fg-bar); margin: 1em 0; }
 
 /* ─── Zettelkasten: link picker / backlinks / TOC (phases 5-6) ─────────── */
-#zklink-picker-dlg, #backlinks-dlg, #toc-dlg, #backup-restore-dlg, #tag-browser-dlg { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+/* `[open]` (pas juste l'ID) : la feuille UA par défaut d'un <dialog> ferme
+   c'est `display: none`, mais un `display` d'auteur SANS ce qualificatif
+   (sélecteur ID, plus spécifique que le sélecteur de type `dialog` de la
+   feuille UA) l'emporte inconditionnellement — le dialogue resterait alors
+   un bloc réellement visible même fermé (round 19bis, bug découvert via le
+   panneau de fichiers épinglé : body en `flex-row` en a fait un item de
+   la ligne au lieu d'un bloc poussé hors écran par le flux normal). */
+#zklink-picker-dlg[open], #backlinks-dlg[open], #toc-dlg[open], #backup-restore-dlg[open], #tag-browser-dlg[open] { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
 #zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header, #tag-browser-header {
   display: flex;
   align-items: center;
@@ -575,6 +714,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 }
 #repo-options-body { padding: 4px 12px 12px; }
 #repo-options-body .settings-row { border-bottom: none; }
+#repo-options-body .action-row { margin: 0 -12px; width: calc(100% + 24px); }
+.dialog-hr { border: none; border-top: 1px solid var(--bg-bar); margin: 8px 0; }
 
 /* ─── Per-note actions (create / rename / move / delete, round 8-gap) ──── */
 .file-item-actions-btn { flex-shrink: 0; }
@@ -590,7 +731,10 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #new-note-input, #note-rename-input { width: 100%; }
 
 #note-actions-body { display: flex; flex-direction: column; padding: 4px 0; }
-#note-actions-body button {
+
+/* Ligne d'action pleine largeur cliquable — menu ⋮ par note, menu ⋮ du
+   navigateur, ligne "Réparer les liens" du dialogue Options du dépôt. */
+.action-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -601,9 +745,11 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
   color: var(--fg);
   width: 100%;
 }
-#note-actions-body button:hover { background: var(--bg-sel); }
+.action-row:hover { background: var(--bg-sel); }
+.action-row:disabled { opacity: 0.6; cursor: default; }
 
-#note-move-dlg { width: min(440px, 92vw); max-height: 78vh; display: flex; flex-direction: column; }
+/* `[open]` — voir le commentaire au-dessus de #zklink-picker-dlg. */
+#note-move-dlg[open] { width: min(440px, 92vw); max-height: 78vh; display: flex; flex-direction: column; }
 #note-move-body { padding: 4px 16px 8px; overflow-y: auto; overscroll-behavior: contain; flex: 1; }
 #note-move-file { padding: 4px 0; }
 #note-move-repo-row { border-bottom: none; }

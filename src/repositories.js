@@ -126,7 +126,14 @@ const Repositories = (() => {
 
   function showList() {
     State.activeRepositoryId = null;
+    // Liste de fichiers épinglée (round 19) : quitter le dépôt referme
+    // aussi l'éditeur (sinon `editor-screen` resterait visible à côté de
+    // `repo-screen` dans un <body> encore en `display:flex`) — le garde-fou
+    // "enregistrer avant de quitter" est déjà passé côté appelant
+    // (`Browser.backOrUp()`, via `Editor.requestClose()`) avant d'arriver ici.
     el('browser-screen').hidden = true;
+    el('editor-screen').hidden = true;
+    document.body.classList.remove('sticky-workspace-active');
     el('repo-screen').hidden = false;
     render();
   }

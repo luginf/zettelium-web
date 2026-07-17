@@ -60,6 +60,32 @@ const ZettelkastenLinks = (() => {
     return m ? m[0] : null;
   }
 
+  /**
+   * Position réelle (offsets dans `content`, pas dans une version tronquée)
+   * de la première occurrence de l'ID Zettelkasten DANS LE CORPS du texte —
+   * pour "aller à l'ID" (placer le curseur/défiler dessus). Même précédence
+   * que `extractId` (première correspondance en balayant de haut en bas,
+   * hors des liens `[[cible|id]]` existants) mais `stripLinks` ne peut pas
+   * servir ici : il décale les offsets, `extractId` s'en accommode car il
+   * ne renvoie que la SOUS-CHAÎNE trouvée, jamais sa position. On saute donc
+   * les correspondances qui chevauchent un lien plutôt que de les retirer
+   * du texte au préalable.
+   */
+  function findBodyIdOccurrence(content, idRegex = DEFAULT_ID_REGEX) {
+    const links = findLinks(content);
+    const re = new RegExp(idRegex.source, 'g');
+    let m;
+    while ((m = re.exec(content))) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (!links.some(link => start < link.end && end > link.start)) {
+        return { start, end };
+      }
+      if (re.lastIndex === m.index) re.lastIndex++; // garde-fou motif à correspondance vide
+    }
+    return null;
+  }
+
   /** Trouve tous les liens `[[cible|id]]` d'un texte, dans l'ordre d'apparition. `start`/`end` = offsets (end exclusif). */
   function findLinks(content) {
     return [...content.matchAll(LINK_REGEX_G)].map(m => ({
@@ -123,7 +149,7 @@ const ZettelkastenLinks = (() => {
 
   return {
     DEFAULT_ID_REGEX, DEFAULT_ID_FORMAT, DEFAULT_NOTE_EXTENSIONS,
-    generateId, stripLinks, extractId, findLinks, linkAt, formatLink,
+    generateId, stripLinks, extractId, findBodyIdOccurrence, findLinks, linkAt, formatLink,
     stripNoteExtension, linkTarget, repairLinks, compileIdRegex,
   };
 })();

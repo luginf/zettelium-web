@@ -992,6 +992,571 @@ code) :
   touchée ; `updateSelectionHighlight()`/`domPositionForOffset()` touchent
   le DOM réel, non testables dans la suite Node existante).
 
+**Round 14 (2026-07-16) — recherche dans le texte en cours d'édition +
+saut à la première occurrence depuis une recherche de contenu** : demande
+explicite, appliquée aux deux plateformes à la fois (voir aussi
+zettelium-android/CLAUDE.md round 24 pour le miroir côté Android).
+- **Barre de recherche dans l'éditeur** (`#ed-search-bar`, nouveau),
+  ouverte via Ctrl+F ou le menu ⋮ -> "Rechercher dans la note" (masquée en
+  mode aperçu, comme insérer ID/lien — fermée automatiquement en y entrant
+  puisqu'elle opère sur `#ed-input`, alors caché). Porte le mécanisme de
+  writhdeck-web/src/editor.js (`searchOpen`/`searchUpdate`/`searchNext`/
+  `searchPrev`/`selectMatch`), sans le remplacement (non demandé ici,
+  "pour retrouver des passages"). `Highlight.highlight(text, searchTerm)`
+  (nouveau 2e paramètre) injecte les surlignages `.hl-search` en
+  post-traitement du HTML déjà rendu — ne marche que sur les nœuds texte,
+  jamais à l'intérieur d'un `<span class="hl-...">` existant, même
+  technique que writhdeck-web/src/highlight.js. La correspondance
+  courante est en plus peinte via la sélection `CSS.highlights` déjà en
+  place pour l'édition normale (round 13) — `selectSearchMatch` appelle
+  `updateSelectionHighlight()` explicitement (pas seulement via le
+  listener `selectionchange` filtré sur le focus du textarea) car le
+  focus peut être sur `#ed-search-input` pendant qu'on navigue les
+  résultats.
+- **Recherche de CONTENU (mode `#browser-search-mode`) -> saut direct à la
+  première occurrence** : `renderFileRow(file, searchTerm)` gagne un 2e
+  paramètre (le texte de la requête telle que tapée, seulement en mode
+  `content`) ; au clic, `Editor.open(file, { searchTerm })` — `open()`
+  gagne un 2e paramètre `options` optionnel, et appelle
+  `searchOpenWithTerm(term)` en toute fin (après la restauration normale
+  de la position du curseur, qu'il écrase intentionnellement — l'intention
+  explicite du clic est de retrouver CE passage-là). `searchOpenWithTerm`
+  n'appelle pas `.focus()` sur le champ de recherche : le focus reste sur
+  le textarea (déjà donné par `open()`), la recherche ne fait qu'afficher
+  la barre + le compteur + surligner/sélectionner la première
+  correspondance.
+- `make clean && make` (0 espace réservé restant), cross-check des IDs
+  `getElementById`/clés `data-i18n*` contre `template.html` (142 clés
+  FR/EN toujours strictement synchronisées, +5 par rapport à avant ce
+  round), `make test` (95/95, inchangé — `highlight.js` reste couvert par
+  les 4 tests existants + vérification manuelle de l'échappement HTML/
+  regex sur des termes de recherche contenant des caractères spéciaux, pas
+  ajoutée à la suite Node car `editor.js`/`browser.js` touchent le DOM
+  réel comme le reste de ce module). **Non testé visuellement dans un
+  navigateur réel** (limite habituelle de cet environnement) — en
+  particulier le focus du champ de recherche par rapport au textarea, et
+  le rendu de la sélection `CSS.highlights` sur une correspondance lointaine
+  dans un document long.
+
+**Round 15 (2026-07-17) — "Dupliquer" dans le menu d'actions par note** :
+demande explicite, pas d'équivalent Android (à ne pas porter là-bas sans
+demande séparée).
+- Nouveau bouton `#note-actions-duplicate` entre "Déplacer" et "Supprimer"
+  (`note-actions-dlg`, `template.html`), icône `Icons.copy()` (Feather
+  "copy", nouvelle). `duplicateFromActions()` (browser.js) copie le
+  fichier dans son dossier d'origine sous `<base>_copy<ext>` (suffixe
+  inséré juste avant la dernière extension, ex. "note.txt" ->
+  "note_copy.txt") ; si ce nom existe déjà, bloque avec une alerte
+  (`browser.duplicateAlreadyExists`) plutôt que d'écraser silencieusement
+  — `FSA.writeNewFile`/`getFileHandle({create:true})` n'auto-suffixe pas
+  en cas de collision comme le fait SAF côté Android (piège documenté
+  côté zettelium-android, `feedback_saf_createfile_collision` — vérifié
+  ici avant d'écrire plutôt que supposé). Vérifie la collision via
+  `parentDir.getFileHandle(newName)` (sans `create`) plutôt que via
+  `State.repoFiles` : `_actionsFile` peut venir des résultats de
+  recherche (portée récursive), pas seulement du dossier actuellement
+  affiché, donc `State.repoFiles` (dossier courant seul) ne suffirait pas
+  à détecter une collision dans un sous-dossier différent. Réindexation
+  complète du dépôt après la copie (nouvelle note à indexer), puis
+  `rescan()` — n'ouvre pas la copie dans l'éditeur (même comportement que
+  Renommer/Déplacer/Supprimer sur ce menu, contrairement au bouton "+" qui
+  ouvre bien la nouvelle note).
+- 2 nouvelles clés i18n × 2 langues (`common.duplicate`,
+  `browser.duplicateAlreadyExists`, `browser.duplicateFailed` — 3 en
+  réalité, 145 au total FR/EN toujours strictement synchronisées).
+  `make clean && make` (0 espace réservé restant), cross-check des IDs,
+  `make test` (95/95, inchangé — nouvelle fonction touche FSA/DOM réel,
+  pas de logique pure à isoler). **Non testé visuellement dans un
+  navigateur réel** (limite habituelle de cet environnement).
+
+**Round 16 (2026-07-17) — "Nouvelle note" dans le menu ⋮ par note** :
+demande explicite, juste après le round 15 — crée une note dans le dossier
+de la note ciblée sans avoir besoin de remonter à la barre d'outils.
+- `_newNoteTarget` (browser.js, nouveau) remplace la supposition implicite
+  "toujours le dossier actuellement affiché" de `confirmNewNote()` —
+  `openNewNoteDialog()` (bouton "+"/menu ⋮ du navigateur) le fixe au
+  dossier courant, `openNewNoteDialogFromActions()` (nouveau, menu ⋮ d'une
+  note) le résout via `FSA.getParentDirHandle(repo.dirHandle, file.path)` —
+  nécessaire parce que `_actionsFile` peut venir d'un résultat de
+  recherche (portée récursive), donc pas forcément du dossier affiché.
+- Vérification de collision de nom durcie au passage : remplace le test
+  contre `State.repoFiles` (snapshot du seul dossier affiché, donc faux
+  quand la cible diffère) par une vraie lecture du dossier cible
+  (`FSA.listChildren(target.handle, [], true)`, tous fichiers confondus —
+  pas seulement les notes reconnues, pour ne jamais silencieusement
+  réutiliser/écraser un fichier existant via `getFileHandle(create:true)`).
+- Icône `Icons.filePlus()` (nouvelle, Feather "file-plus"). Réutilise le
+  libellé existant `browser.newNoteTitle` ("Nouvelle note") plutôt que
+  d'ajouter une clé dupliquée.
+- `make clean && make`, cross-check des IDs, `make test` (95/95, inchangé).
+  **Non testé visuellement dans un navigateur réel.**
+
+**Round 17 (2026-07-17) — en-tête du navigateur : un seul menu "⋮"** :
+demande explicite, sur le modèle exact d'Android (`BrowserScreen.kt`,
+`RepositoryOptionsDialog`) — avec une précision supplémentaire de
+l'utilisateur : aucune action potentiellement perturbatrice ("réparer les
+liens") ne doit rester une icône cliquable en accès direct, tout doit vivre
+dans un menu/dialogue explicite.
+- **En-tête simplifié** : `browser-options-btn`/`browser-repair-btn`/
+  `browser-new-btn`/`browser-settings-btn` (4 icônes séparées) remplacés
+  par un seul bouton `#browser-menu-btn` ("⋮") ouvrant `#browser-menu`
+  (même mécanisme ouvrir/fermer/clic-extérieur/Échap que le menu ⋮ de
+  l'éditeur, `editor.js` — sélecteurs `#editor-menu`/`#browser-menu`
+  fusionnés dans `style.css` pour ne pas dupliquer la présentation du
+  dropdown) avec 3 entrées : "Options du dépôt", "Nouvelle note",
+  "Réglages" (`Settings.open('browser-screen')`, appelé directement —
+  `settings.js` ne câble plus rien sur l'écran navigateur, son ancien
+  `browser-settings-btn` a disparu). `browser-refresh-btn`/`browser-sort-btn`
+  restent des icônes directes (non destructifs, fréquents — même logique
+  que le tri/la recherche qui restent des icônes sur Android).
+- **"Options du dépôt" augmenté** (`repo-options-dlg`) : ajout d'un champ
+  "Nom du dépôt" (renommage, nouveau `renameRepository(repo, newName)`
+  dans `state.js` — met aussi à jour `State.dirStack[0].name`, capturé une
+  seule fois par `scanActiveRepo()` et jamais relu depuis `repo.name`,
+  sinon le fil d'Ariane du navigateur afficherait l'ancien nom jusqu'au
+  prochain changement de dossier) et de la ligne "Réparer les liens"
+  (déplacée depuis son ancienne icône dédiée dans la barre — désormais une
+  ligne de texte explicite dans ce dialogue, jamais une icône isolée,
+  demande explicite de l'utilisateur ; toujours désactivée + relabellisée
+  "Réparation en cours…" pendant l'exécution, même retour visuel que
+  `isRepairingLinks` côté Android).
+- **Nouvelle classe CSS `.action-row`** généralisée à partir de l'ancien
+  bloc `#note-actions-body button` (ligne cliquable pleine largeur, icône +
+  texte) — réutilisée par le nouveau menu ⋮ du navigateur ET la ligne
+  "Réparer les liens", au lieu de dupliquer ces déclarations par ID comme
+  l'aurait fait une copie directe du bloc existant.
+- 3 clés i18n retirées (`browser.repoOptionsTooltip`, `browser.repairTooltip`,
+  `browser.newNoteTooltip` — devenues mortes, plus aucune icône à
+  survoler) et 4 ajoutées (`browser.moreTooltip`, `browser.repoNameLabel`,
+  `browser.repairLinksLabel`, `browser.repairingLabel`), 146 au total FR/EN
+  toujours strictement synchronisées. `make clean && make`, cross-check
+  des IDs, `make test` (95/95, inchangé — nouvelle logique touche
+  FSA/DOM/dialogues réels). **Non testé visuellement dans un navigateur
+  réel** (limite habituelle de cet environnement) — en particulier le
+  positionnement du dropdown `#browser-menu` et le renommage de dépôt en
+  situation réelle (plusieurs dépôts, dossier profondément imbriqué).
+
+**Round 18 (2026-07-17) — "Aller à l'ID Zettelkasten" dans le menu ⋮ de
+l'éditeur** : demande explicite ("pour y accéder directement, et si l'id
+n'existe pas, indique qu'il n'y en a pas").
+- `ZettelkastenLinks.findBodyIdOccurrence(content, idRegex)` (nouveau,
+  `zettelkasten.js`, fonction pure testée) : localise la première
+  occurrence de l'ID **dans le corps** (offsets réels dans `content`, pas
+  dans une version tronquée) en sautant celles qui chevauchent un lien
+  `[[cible|id]]` existant — même précédence que `extractId` (première
+  correspondance de haut en bas, hors liens), mais ne peut pas réutiliser
+  `stripLinks` (qui décale les offsets) puisqu'ici la POSITION compte, pas
+  seulement la sous-chaîne trouvée.
+- `editor.js` : `goToId()` reproduit d'abord la précédence "nom de fichier
+  gagne outright" (`detectZkId`/`extractId` partout ailleurs dans l'app) —
+  si l'ID vient du nom, rien à localiser dans le texte, message dédié
+  (`editor.goToIdNotInBody`) plutôt que de chercher quand même dans le
+  corps. Sinon, `findBodyIdOccurrence` ; si `null`, message
+  `editor.goToIdNone`. Trouvé : place le curseur + défile dessus via
+  `pixelTopForOffset` (même technique que `navigateToToc`/la recherche en
+  note). Nouvel item `#editor-menu-goto-id` masqué en mode aperçu, même
+  condition que insérer ID/lien/rechercher (rien à sélectionner dans le
+  textarea, caché dans ce mode) — ajouté à `updateEditorMenuVisibility`.
+- Icône `Icons.crosshair()` (nouvelle, Feather "crosshair") — distincte du
+  hash déjà utilisé pour "Insérer un ID", pour ne pas suggérer la même
+  action.
+- 2 tests (`findBodyIdOccurrence` : trouve la bonne occurrence en sautant
+  celle dans un lien ; renvoie `null` sans ID dans le corps). `make clean
+  && make`, cross-check des IDs, `make test` (95 -> 97, +2), 149 clés
+  i18n FR/EN toujours strictement synchronisées (+3 :
+  `editor.goToId`/`goToIdNotInBody`/`goToIdNone`). **Non testé
+  visuellement dans un navigateur réel.**
+
+**Round 19 (2026-07-17) — liste de fichiers épinglée à gauche de l'éditeur** :
+demande explicite, "sur le modèle du TOC qui reste attaché en mode web" —
+deux choix de conception validés par l'utilisateur avant implémentation
+(question posée) : (1) le panneau garde TOUTES les fonctions actuelles du
+navigateur (recherche/tri/sous-dossiers/menu ⋮), juste rétréci, pas une
+liste simplifiée ; (2) fermer la note ouverte pendant que le panneau est
+épinglé affiche un espace vide dans la zone principale, le panneau reste
+étroit (ne se réagrandit pas tant qu'on ne quitte pas le dépôt).
+- **Nouveau réglage `State.settings.fileListSidebarMode`** (bool, défaut
+  `false`), Réglages > Éditeur juste après `tocSidebarMode` — mais
+  **contrairement au TOC, ne s'active qu'à l'ouverture d'une première note**
+  dans le dépôt (pas dès l'entrée dans le dépôt) : `Repositories.open()`
+  reste inchangé, le navigateur s'ouvre toujours plein écran normalement.
+- **Architecture** : `#browser-screen` et `#editor-screen` (jusqu'ici
+  strictement mutuellement exclusifs, un seul visible à la fois) peuvent
+  désormais être visibles SIMULTANÉMENT — la classe `body.sticky-workspace-
+  active` (posée/retirée par JS, jamais par CSS seule) fait passer `<body>`
+  en `display:flex;flex-direction:row` UNIQUEMENT quand c'est le cas (sinon
+  le flux bloc normal historique s'applique, aucun changement de layout
+  pour tout le reste de l'app) ; `#browser-screen` devient une colonne fixe
+  (`flex:0 0 320px`), `#editor-screen` prend le reste (`flex:1 1 auto`).
+  `editor.js` `open()` pose la classe (dérivée du réglage à chaque
+  ouverture de note, pas mémorisée) et ne cache plus `browser-screen` si le
+  réglage est actif.
+- **"Fermer une note" en mode épinglé ne referme plus tout l'écran** :
+  `#editor-screen` a été restructuré — son contenu réel (`#ed-header`/
+  `#ed-search-bar`/`#ed-body`) est maintenant enveloppé dans
+  `#editor-note-view`, sibling d'un nouveau `#editor-empty-state` (message
+  "Choisis une note..."). `close()` bascule entre les deux SANS jamais
+  cacher `editor-screen` lui-même quand `sticky-workspace-active` est
+  posée — l'écran garde sa largeur, seul son contenu change. Hors mode
+  épinglé, comportement historique inchangé (referme tout l'écran, réaffiche
+  `browser-screen` plein écran).
+- **Trois autres points de transition rendus conscients du mode épinglé**
+  (sinon un écran plein-largeur normal se retrouverait coincé à côté d'un
+  panneau resté visible dans un `<body>` encore en `flex-row`) :
+  `Settings.open`/`close` (cache/réaffiche `browser-screen` ET
+  `editor-screen` ensemble si `sticky-workspace-active` était posée au
+  moment de l'ouverture — la classe elle-même sert de source de vérité,
+  retirée à l'ouverture des réglages et reposée à la fermeture) ;
+  `Repositories.showList()` (quitter le dépôt cache aussi `editor-screen`
+  et retire la classe, pas seulement `browser-screen`) ; `Browser.backOrUp()`
+  (appelle désormais `Editor.requestClose()` avant `Repositories.showList()`
+  à la racine — **nouveau garde-fou nécessaire** : contrairement à avant,
+  une note dirty peut maintenant rester ouverte dans le panneau PENDANT
+  qu'on navigue/quitte le dépôt depuis la liste, un cas qui ne pouvait tout
+  simplement pas se produire quand les deux écrans étaient exclusifs).
+- **`Editor.openOther` généralisé aux deux points d'entrée du navigateur**
+  (clic sur une ligne de fichier, création d'une nouvelle note) — plus
+  seulement backlinks/ZkLinks internes à l'éditeur. Nécessaire pour la
+  même raison : cliquer une AUTRE note ou en créer une pendant qu'une note
+  dirty est déjà ouverte dans le panneau épinglé doit demander confirmation
+  (`requestLeave`), pas écraser silencieusement — risque de perte de
+  données qui n'existait pas avant ce panneau. `openOther` accepte
+  maintenant un `options` optionnel (transmis à `open`, pour le
+  `searchTerm` du clic sur un résultat de recherche de contenu).
+  `Editor.close()` gagne aussi un early-return `if (!_file) return` (no-op
+  sûr quand `requestClose()` est appelé sans note ouverte — cas courant
+  hors mode épinglé).
+- **Surlignage de la note active** dans la liste (`renderFileRow`,
+  `.file-item-active`, fond `--bg-sel`) — compare `Editor.currentPath()`
+  (nouvel export, `_file?.path`) à chaque ligne, seulement en mode épinglé.
+  Rafraîchi via `Browser.render()` appelé depuis `editor.js` après chaque
+  `open()`/`close()` réussi (mode épinglé seulement).
+- **Limite connue, non traitée cette session** : renommer/déplacer/
+  supprimer la note ACTUELLEMENT OUVERTE depuis sa propre ligne dans le
+  panneau (menu ⋮ par note) ne notifie pas l'éditeur — un cas neuf, rendu
+  possible seulement par ce panneau (avant, on ne pouvait pas voir/cliquer
+  la liste pendant qu'une note était ouverte). L'éditeur garderait un
+  `_file`/titre/chemin de curseur périmés jusqu'à la fermeture manuelle de
+  la note. Pas demandé explicitement, périmètre déjà large pour cette
+  session — à corriger si rencontré en usage réel (piste : dans
+  `duplicateFromActions`/`deleteFromActions`/`confirmNoteRenameFromBrowser`/
+  `performMove`, si `Editor.currentPath() === file.path`, appeler
+  `Editor.close()` après l'opération).
+- `make clean && make`, cross-check des IDs, `make test` (97/97, inchangé
+  — aucune nouvelle logique pure, tout ce round touche DOM/state/layout),
+  152 clés i18n FR/EN toujours strictement synchronisées (+3 :
+  `settings.fileListSidebarLabel`/`Desc`, `editor.emptyStateHint`).
+  **Non testé visuellement dans un navigateur réel** (limite habituelle de
+  cet environnement) — en particulier tout ce round : le layout flex
+  réel du panneau épinglé, la bascule Réglages depuis ce mode, et la
+  sortie de dépôt avec une note dirty ouverte dans le panneau.
+
+**Round 19bis (2026-07-17) — bug réel du panneau épinglé (dialogue "Déplacer"
+bloqué à l'écran) + panneau redimensionnable** : deux retours utilisateur
+liés au round 19.
+- **Bug corrigé, effectivement testé cette fois** (headless Brave piloté
+  via Chrome DevTools Protocol brut — pas de puppeteer/playwright
+  installés ici, client CDP écrit à la main sur le `WebSocket` global de
+  Node 22 ; `Editor.open()` piloté directement avec un `dirHandle`/
+  `fileHandle` factices, sans vraie interaction File System Access,
+  impossible à automatiser en headless) : ouvrir une note avec le
+  panneau épinglé actif affichait le dialogue "Déplacer" figé au premier
+  plan, sans jamais pouvoir le fermer. **Cause réelle, pas un artefact du
+  panneau lui-même** : `#note-move-dlg` et le groupe
+  `#zklink-picker-dlg`/`#backlinks-dlg`/`#toc-dlg`/`#backup-restore-dlg`/
+  `#tag-browser-dlg` (style.css) portaient un `display: flex`
+  inconditionnel, jamais scopé à `[open]` — un sélecteur d'ID (plus
+  spécifique que le sélecteur de type `dialog` de la feuille UA, qui pose
+  `display: none` tant que l'attribut `open` est absent) l'emportait donc
+  TOUJOURS, même dialogue fermé. Ce bug latent existait déjà avant ce
+  round (probablement depuis le round 8) mais restait invisible : ces
+  dialogues fermés-mais-`display:flex` étaient de simples blocs supplémentaires
+  après `#browser-screen`/`#editor-screen` dans le flux normal du `<body>`
+  (jamais flex avant ce round), poussés sous la ligne de flottaison par
+  `overflow:hidden` sur `html,body`. Le panneau épinglé (round 19) passe
+  `<body>` en `display:flex;flex-direction:row` dès qu'il est actif — ces
+  mêmes blocs deviennent alors des ITEMS DE LA LIGNE, positionnés au début
+  (avant browser-screen/editor-screen), d'où leur apparition soudaine.
+  Corrigé en ajoutant `[open]` aux deux sélecteurs concernés — comportement
+  à l'ouverture/fermeture réelle (`showModal()`/`.close()`) vérifié
+  inchangé après coup (`display:none` fermé, `display:flex` ouvert,
+  redevient `none` après fermeture).
+- **Panneau redimensionnable par glisser-déposer** (demande explicite :
+  "même si c'est plus petit que la longueur du titre de la plus longue
+  note" — donc pas de plancher lié au contenu). Nouveau réglage
+  `State.settings.fileListSidebarWidth` (int px, défaut 320, mêmes
+  mécanismes persistance IndexedDB/`.ini` que les autres réglages
+  numériques) piloté par une variable CSS `--file-list-sidebar-width`
+  (`applyFileListSidebarWidth()`, app.js — même pattern que
+  `applyEditorTypography()`, appelée au démarrage ET depuis le setter).
+  `#file-list-sidebar-resizer` (nouvelle poignée fine, `cursor: col-resize`,
+  n'existe en layout que sous `body.sticky-workspace-active` — pas de
+  `hidden` DOM séparé à synchroniser) : `mousedown`/`mousemove`/`mouseup`
+  sur `document` (browser.js `wireSidebarResizer()`) mettent à jour la
+  variable CSS en direct pendant le glisser (pas de re-render coûteux),
+  persistée une seule fois au relâchement. Bornes fixes 160-640px
+  (`FILE_LIST_SIDEBAR_MIN/MAX`), pas de champ Réglages séparé — le
+  glisser-déposer suffit.
+- **`.file-item-meta` (date/chemin) plafonnée à `max-width: 45%`** — sans
+  ce plafond, testé et confirmé par capture d'écran : `.file-item-name`
+  (flex:1, flex-basis 0%, donc rien à céder puisqu'il part déjà de 0)
+  perdait la priorité de rétrécissement face à `.file-item-meta`
+  (flex-basis auto/contenu), au point que le NOM du fichier disparaissait
+  complètement (largeur nulle) et seule la date restait visible dès que le
+  panneau descendait sous ~250px. Plafonner la date à 45% garantit que le
+  nom (plus utile) récupère toujours le reste de la ligne.
+- `make clean && make`, cross-check des IDs, `make test` (97/97, inchangé),
+  153 clés i18n FR/EN toujours strictement synchronisées (+1 :
+  `browser.resizeSidebarTooltip`). **Vérifié visuellement cette fois**
+  (captures d'écran headless Brave, voir ci-dessus) : mise en page
+  panneau+éditeur côte à côte correcte, glisser-déposer fonctionnel de 320
+  à 180px avec noms de fichiers longs toujours partiellement lisibles
+  (ellipse), dialogue "Déplacer" s'ouvrant/se fermant normalement.
+  **Non vérifié en conditions réelles** : interaction tactile (pas de
+  souris), et le flux complet avec un vrai dépôt/de vrais fichiers SAF
+  (ce test contourne le File System Access API, impossible à automatiser
+  en headless).
+
+**Round 20 (2026-07-17) — curseur décalé après un titre (même cause que le
+round 13), menu contextuel (clic droit) de formatage, suivre les liens en
+édition** : trois demandes explicites dans le même message.
+- **Bug corrigé, vérifié par mesure directe (headless Brave + CDP,
+  `deltaPx: 0` entre le caret et la position réelle du caractère dans
+  l'overlay)** : le VRAI caret natif du textarea (`caret-color`) restait
+  visible malgré le round 13 (qui n'avait remplacé que le rendu de la
+  SÉLECTION, `if (start === end) return` dans `updateSelectionHighlight`
+  laissait explicitement le caret de côté) — donc toujours positionné selon
+  les métriques de ligne UNIFORMES du textarea, qui divergent de l'overlay
+  dès qu'un titre agrandi (`.hl-h1`..`.hl-h4`) précède la ligne courante,
+  exactement la même cause racine que le décalage de sélection déjà
+  résolu. Corrigé avec la même famille de technique : `#ed-input {
+  caret-color: transparent }` (le vrai caret natif ne s'affiche plus
+  jamais) + `#ed-caret` (nouveau, `editor.js` `updateCaretIndicator()`) —
+  un élément positionné en pixels via un `Range` collé sur le texte RÉEL
+  du pre (`domPositionForOffset`, déjà utilisé pour la sélection), donc
+  toujours aligné avec ce qui est visuellement affiché. Contrairement à la
+  sélection, cette technique (`Range.getClientRects()`/
+  `getBoundingClientRect()`) ne dépend PAS de la CSS Custom Highlight API
+  — fonctionne sans le gating `.custom-highlight-supported`. Rappelé après
+  chaque frappe/déplacement de sélection (`rehighlight`, le listener
+  `selectionchange`, `syncScroll`, `selectSearchMatch`, `blur`) — mêmes
+  points d'accroche que `updateSelectionHighlight`. Clignote (animation
+  CSS), redémarre son cycle à chaque déplacement (coupe/relit `animation`
+  pour forcer un reflow) pour rester plein pendant la frappe comme un vrai
+  caret natif. Repli sur le coin haut-gauche pour une note entièrement
+  vide (aucun nœud texte à mesurer dans le pre).
+- **Menu contextuel (clic droit) de formatage** (nouveau,
+  `src/editor-formatting.js` + wiring dans `editor.js`), porté d'Android
+  (`EditorScreen.kt`'s `ActionMode.Callback` du long appui +
+  `EditorFormatting.kt`) — même liste, même ordre : "Suivre le lien" (voir
+  plus bas, en tête seulement si applicable), Titre 1/2/3, Gras, Italique,
+  Souligné, Barré, Commentaire, Date. **Volontairement pas porté** :
+  correcteur orthographique (bascule d'un réglage d'app, pas vraiment du
+  "formatage de texte" — non demandé explicitement, `#ed-input` reste sur
+  `spellcheck="false"` fixe comme avant).
+  - `editor-formatting.js` (nouveau module pur, testé — 17 tests dérivés
+    1:1 de `EditorFormattingTest.kt`) : `wrapInline`/`toggleLinePrefix`/
+    `toggleHeading`, mêmes règles de bascule que Kotlin. **Différence de
+    forme délibérée** : le Kotlin renvoie (texte entier, nouvelle
+    sélection) — pratique pour réassigner un `Editable` — alors qu'ici
+    chaque fonction renvoie `{rangeStart, rangeEnd, replacement,
+    cursorStart, cursorEnd}` (la portion de texte ORIGINAL réellement
+    modifiée), pour pouvoir appliquer le changement via
+    `execCommand('insertText', ...)` (`applyFormattingResult`, editor.js :
+    sélectionne `[rangeStart, rangeEnd]` puis insère `replacement` par-
+    dessus) plutôt que réassigner `.value` en entier — même raisonnement
+    que `insertAtCursor` (round 2 : réassigner `.value` efface l'historique
+    annuler/rétablir natif du textarea). Vérifié : `execCommand('undo')`
+    restaure bien le texte d'origine après une action de ce menu (headless
+    Brave).
+  - `#ed-context-menu` (nouveau, `position:fixed`, coordonnées de
+    `contextmenu.clientX/Y`, reclampé après un premier affichage non
+    contraint pour ne jamais déborder de la fenêtre) — remplace
+    (`preventDefault`) le menu contextuel natif du navigateur. Icônes :
+    `Icons.link()` (suivre le lien, même glyphe que backlinks/insérer un
+    lien) et `Icons.clock()` (date, même glyphe que créer une sauvegarde) ;
+    Titre 1/2/3/Gras/Italique/Souligné/Barré/Commentaire utilisent des
+    glyphes texte stylés (`.ctx-glyph` : "H1"/"H2"/"H3"/lettre en gras/
+    italique/souligné/barré/"%") plutôt que de nouvelles icônes SVG —
+    zéro nouvelle forme à dessiner pour un rendu déjà explicite (même
+    esprit que les symboles unicode déjà acceptés ailleurs : non colorés,
+    `currentColor` implicite via le texte).
+- **Suivre un lien `[[cible|zkId]]` depuis le mode ÉDITION** (jusqu'ici
+  seulement possible en aperçu, `onPreviewClick`) : "Suivre le lien"
+  (`ed-ctx-follow-link`) n'apparaît dans le menu contextuel QUE si
+  `ZettelkastenLinks.linkAt(content, selectionStart, selectionEnd)` (déjà
+  porté mais jamais câblé à une action jusqu'ici) trouve un lien
+  chevauchant le curseur/la sélection — vérifié par test headless (visible
+  curseur dans un lien, caché sinon). Résout via `Index.findByZkId` (même
+  mécanisme que `togglePreview`'s `resolveZkLink`) puis `openOther(...)` —
+  même garde-fou "enregistrer avant de quitter" que le clic sur un lien
+  résolu en aperçu. ID introuvable : message dédié
+  (`editor.ctxLinkNotFound`, "Aucune note avec l'ID {zkId}." — mot pour
+  mot la chaîne Android `editor_no_note_for_id`), pas un échec silencieux.
+- 11 nouvelles clés i18n × 2 langues (164 au total FR/EN toujours
+  strictement synchronisées). `make clean && make`, cross-check des IDs,
+  `make test` (114/114, +17 pour `editor-formatting.js` — nouveau fichier
+  ajouté à `build.py`/`Makefile`/`test/run.js`). **Vérifié par mesure
+  directe et capture d'écran** (headless Brave + CDP, voir ci-dessus) :
+  alignement du caret après un titre, ouverture/fermeture du menu,
+  transformation de texte correcte pour Gras/Titre, visibilité
+  conditionnelle de "Suivre le lien", historique annuler/rétablir
+  préservé. **Non vérifié en conditions réelles** : clavier/souris
+  physiques, et clic droit sur écran tactile (pas d'équivalent testé —
+  cette fonctionnalité est explicitement souris/clic droit uniquement,
+  comme le reste de cette version web).
+
+**Round 20bis (2026-07-17) — retour immédiat sur le round 20 : "le curseur
+ne se trouve plus du tout à la bonne place, si je clique puis écrit, c'est
+décalé"** : régression réelle causée par le fix du round 20, root-causée
+par une reproduction directe (clic SOURIS RÉEL simulé via le protocole
+CDP `Input.dispatchMouseEvent`/`dispatchKeyEvent` — pas juste
+`setSelectionRange` programmatique comme la vérification du round 20, qui
+ne pouvait pas révéler ce problème puisqu'elle contourne justement la
+résolution native d'un clic).
+- **Cause racine, distincte du problème d'affichage déjà corrigé au round
+  20** : un clic natif sur le vrai `<textarea>` (invisible mais bien réel,
+  au-dessus de l'overlay en `z-index`) résout sa position selon SES
+  PROPRES métriques UNIFORMES (une seule taille de police pour toutes les
+  lignes) — alors que l'overlay agrandit les lignes de titre, poussant
+  tout ce qui suit plus bas. Le round 20 avait rendu l'AFFICHAGE du
+  curseur fidèle à la VRAIE position résolue (`selectionStart`) — mais
+  cette position résolue elle-même reste fausse dès que le décalage
+  cumulé de plusieurs titres dépasse la hauteur d'une ligne. Avant le
+  round 20, le vieux caret natif (`caret-color`) utilisait CETTE MÊME
+  résolution fausse pour s'afficher — donc affichage et frappe restaient
+  cohérents ENTRE EUX (même référentiel erroné des deux côtés), même si
+  décalés par rapport à l'overlay. Le round 20 a rendu l'affichage
+  fidèle à l'overlay SANS corriger la résolution du clic elle-même —
+  cassant cette cohérence : le curseur affiché (maintenant correct) et
+  l'endroit où la frappe atterrit réellement (toujours faux) pouvaient
+  diverger visiblement. Confirmé par mesure directe : sur une note à 15
+  titres, cliquer sur une ligne plaçait le curseur en toute fin de note.
+- **Corrigé** (`correctedOffsetAt`, editor.js, nouveau) : après un simple
+  clic (`mouseup`, seulement si `selectionStart === selectionEnd` — un
+  glisser/mot/ligne sélectionné est laissé à la résolution native, non
+  corrigé), retrouve la VRAIE position cliquée dans le rendu de l'overlay
+  via `document.caretRangeFromPoint` (Chromium/WebKit — cohérent avec la
+  contrainte FSA déjà assumée) puis corrige `setSelectionRange` en
+  conséquence. **Piège découvert et contourné** : `caretRangeFromPoint`
+  fait son propre hit-test comme `elementFromPoint` — au point cliqué, le
+  textarea (au-dessus) ou le pre (`pointer-events: none`, purement
+  décoratif) l'empêchent tous deux de "voir" le texte réel ; réglé en
+  basculant temporairement `pointer-events` des deux (textarea: none, pre:
+  auto) pendant la seule durée synchrone de l'appel, restauré aussitôt.
+  `offsetForDomPosition` (nouveau, inverse exact de `domPositionForOffset`
+  déjà existant) convertit le (nœud, offset) DOM trouvé en offset de texte
+  brut.
+- **`pixelTopForOffset` (défilement vers le curseur — ouverture d'une note,
+  TOC, recherche, "Aller à l'ID") réécrite avec la même rigueur** : mesurait
+  jusqu'ici sur un div miroir aux métriques UNIFORMES du textarea (comme le
+  clic ci-dessus, même défaut), donc pouvait défiler vers une position qui
+  laisse la cible réelle hors de la zone visible sur une note à plusieurs
+  titres — vérifié par mesure directe : avant ce correctif, restaurer un
+  curseur après 15 titres défilait vers une position qui laissait la cible
+  à 1181px de haut dans une zone visible de 775px (largement hors champ).
+  Mesure maintenant directement sur le texte réel du pre via un `Range`
+  (même technique que le caret), corrigé à 540px (dans les 775px visibles).
+- **Bug de timing corrigé au passage, condition nécessaire au fix
+  ci-dessus** : `syncScroll()` (qui recopie `ta().scrollTop` vers
+  `pre().scrollTop`) n'était déclenché que par l'évènement natif 'scroll',
+  dispatché de façon ASYNCHRONE par le navigateur après une affectation
+  programmatique de `scrollTop` — donc `pre()` pouvait rester désynchronisé
+  (parfois avec le défilement de la note PRÉCÉDENTE) pendant un court
+  instant après `input.scrollTop = ...`, faussant toute mesure faite
+  immédiatement après (dont `pixelTopForOffset` lui-même). `syncScroll()`
+  est maintenant appelée explicitement et synchrone juste après chacune des
+  4 affectations de `input.scrollTop` dans ce fichier (une l'était déjà,
+  `selectSearchMatch`, pour une autre raison documentée) ; une aussi
+  ajoutée juste après `input.value = content` dans `open()` (avant même la
+  première mesure), pour repartir d'un état synchronisé à 0 dès le début.
+- Méthode de vérification à retenir pour tout futur bug de ce type : un
+  clic **programmatique** (`setSelectionRange` direct) ne peut PAS révéler
+  un problème de résolution de clic natif — seul un clic **simulé au
+  niveau du protocole d'entrée** (`Input.dispatchMouseEvent`, pas un
+  `MouseEvent` JS synthétique non plus, qui ne déclenche pas la résolution
+  native de caret d'un textarea) le peut. Round 20 avait vérifié le
+  mauvais niveau ; round 20bis a dû redescendre d'un cran.
+- `make clean && make`, `make test` (114/114, inchangé — corrections
+  DOM/interaction réelles, pas de nouvelle logique pure). **Vérifié par
+  mesure directe et capture d'écran** (headless Brave + CDP, clic réel +
+  frappe réelle simulés, note à 15 titres avec défilement) — curseur
+  affiché, position de frappe réelle, et défilement à l'ouverture tous
+  alignés sur la même mesure exacte. **Non vérifié en conditions
+  réelles** (souris/clavier physiques) — à confirmer par l'utilisateur.
+
+**Round 20ter (2026-07-17) — retour immédiat sur le round 20bis : caret
+invisible sur une ligne vide, "tout est moins réactif", + option pour
+désactiver l'agrandissement des titres** : trois demandes dans le même
+message.
+- **Bug réel trouvé et corrigé, root-causé empiriquement (pas par
+  déduction)** : `updateCaretIndicator()` (round 20) gérait déjà le cas
+  "ligne vide" via `range.selectNodeContents(span); range.collapse(true)`
+  sur le `<span class="hl-line">` — supposé fonctionner puisque `.hl-line`
+  a `min-height: 1lh` même vide. **Vérifié empiriquement (headless + test
+  dédié) que c'est faux** : un `Range` construit ainsi (conteneur =
+  ÉLÉMENT, pas nœud texte) renvoie systématiquement un rect VIDE dans
+  Chromium — `getClientRects()` longueur 0 ET `getBoundingClientRect()`
+  tout à zéro — **y compris pour une ligne NON vide** (testé sur les deux).
+  Seul un `Range` collé à un vrai NŒUD TEXTE donne un rect utilisable.
+  Corrigé (`lineRangeForOffset`, editor.js) : localise d'abord la ligne
+  (`lineElementForOffset`, nouveau — compte les `\n` comme
+  `Highlight.highlight()` pour trouver le `<span class="hl-line">` et
+  l'offset local), puis `domPositionWithin` (généralisation de
+  `domPositionForOffset` à une racine arbitraire, pas seulement tout le
+  pre) pour un vrai nœud texte À L'INTÉRIEUR de cette ligne — pour
+  n'IMPORTE quel offset local, y compris 0. Seule une ligne VRAIMENT vide
+  (`domPositionWithin` ne trouve aucun nœud texte) retombe sur l'ÉLÉMENT
+  `<span>` lui-même : `Element.getClientRects()`/`getBoundingClientRect()`
+  existent aussi et donnent, eux, un rect valide (bord gauche = début de
+  ligne) — vérifié empiriquement que CE cas-là fonctionne bien à la
+  différence d'un `Range` sur le même élément. L'appelant traite Range et
+  Element de façon uniforme (même signature `getClientRects`/
+  `getBoundingClientRect`), pas de branchement selon le type retourné.
+- **"Tout est moins réactif"** : cause identifiée par lecture de code (pas
+  de profilage direct disponible dans cet environnement) —
+  `updateCaretIndicator()` est appelée depuis `syncScroll()`, donc à
+  CHAQUE évènement 'scroll' (potentiellement très fréquent pendant un
+  défilement continu à la molette/au trackpad), et forçait un reflow
+  synchrone à chaque appel (`indicator.style.animation = 'none'; void
+  indicator.offsetHeight; indicator.style.animation = ''`, nécessaire pour
+  relancer le clignotement) — un coût justifié sur un vrai déplacement du
+  curseur (frappe, clic, flèches), pas sur un simple repositionnement
+  visuel dû au défilement où la position de caractère n'a pas changé.
+  Corrigé avec `_lastCaretOffset` (nouveau, module-level) : le forçage de
+  reflow n'a lieu que si l'offset a RÉELLEMENT changé depuis le dernier
+  appel — un pur repositionnement de défilement met à jour `left`/`top`
+  (écritures de style bon marché, pas de lecture forçant un reflow) sans
+  jamais toucher `animation`. **Non mesuré avec un vrai profileur** (pas
+  disponible ici) — correction par raisonnement sur la source du coût
+  (reflow forcé répété), à confirmer par l'utilisateur si le ressenti
+  persiste.
+- **Nouveau réglage `State.settings.headingSizesEnabled`** (bool, défaut
+  `true` — comportement historique inchangé par défaut), Réglages >
+  Éditeur juste après `fileListSidebarMode` : désactive l'agrandissement
+  des titres dans l'éditeur (`.hl-h1`..`.hl-h4`, maintenant gatées derrière
+  une classe `.heading-sizes` posée sur `<html>`) SANS toucher leur couleur
+  (`.hl-heading`, jamais conditionnée). Motivation explicite de
+  l'utilisateur : "on verra si cela aide" — l'agrandissement des titres est
+  la cause racine COMMUNE aux rounds 13/20/20bis (le vrai textarea ne peut
+  avoir qu'une seule taille de police uniforme, donc toute mesure/
+  résolution qui s'appuie sur SES propres métriques — dont, non corrigée à
+  ce jour, la navigation clavier verticale — diverge de l'overlay dès
+  qu'une ligne agrandie précède la ligne courante) ; ce réglage permet de
+  l'éliminer entièrement à la source plutôt que de continuer à corriger
+  chaque nouvelle manifestation au cas par cas. Vérifié empiriquement
+  (headless) : taille 28.8px (titre niveau 1, ×1.8 de la base 16px) avec le
+  réglage actif, retombe à 16px désactivé, couleur du titre inchangée dans
+  les deux cas, ré-activable sans rechargement.
+- 2 nouvelles clés i18n × 2 langues (166 au total FR/EN toujours
+  strictement synchronisées). `make clean && make`, cross-check des IDs,
+  `make test` (114/114, inchangé). **Vérifié empiriquement** (headless
+  Brave + CDP) pour les deux bugs et le nouveau réglage — voir les mesures
+  ci-dessus. **Non vérifié en conditions réelles** (souris/clavier
+  physiques, ressenti de réactivité) — à confirmer par l'utilisateur, en
+  particulier si "moins réactif" a une autre cause que celle identifiée
+  ici.
+
 ## Ne jamais faire
 
 - Ne jamais commiter au nom de l'utilisateur sans demande explicite.

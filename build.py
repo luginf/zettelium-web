@@ -20,6 +20,7 @@ JS_ORDER = [
     'txt2tags/summary.js',
     'txt2tags/toc.js',
     'zettelkasten.js',
+    'editor-formatting.js',
     'tags.js',
     'ini.js',
     'state.js',

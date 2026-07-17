@@ -27,6 +27,9 @@ const INI = (() => {
     editor_line_spacing:             ['editorLineSpacing', 'float'],
     autosave_enabled:                ['autosaveEnabled', 'bool'],
     toc_sidebar_mode:                ['tocSidebarMode', 'bool'],
+    file_list_sidebar_mode:          ['fileListSidebarMode', 'bool'],
+    file_list_sidebar_width:         ['fileListSidebarWidth', 'int'],
+    heading_sizes_enabled:           ['headingSizesEnabled', 'bool'],
   };
   const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, [jsKey]]) => [jsKey, k]));
 

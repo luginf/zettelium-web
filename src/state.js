@@ -71,7 +71,32 @@ const State = {
     // l'active pas explicitement. Le panneau reste ouvert après un clic
     // sur un titre (persistant), jusqu'à fermeture explicite (round 12 :
     // le mode "épingle" a été retiré, jugé redondant avec le bouton "✕").
-    tocSidebarMode: false
+    tocSidebarMode: false,
+
+    // Liste des fichiers épinglée à gauche de l'éditeur (round 19), sur le
+    // même principe que tocSidebarMode ci-dessus — désactivé par défaut.
+    // Contrairement au panneau TOC, ne s'active qu'à l'ouverture d'une
+    // note (voir editor.js `open()`/`close()` et la classe body
+    // `sticky-workspace-active`), pas dès l'entrée dans un dépôt.
+    fileListSidebarMode: false,
+    // Largeur du panneau ci-dessus (round 19bis, retour utilisateur :
+    // "pouvoir modifier la taille... même si c'est plus petit que la
+    // longueur du titre de la plus longue note") — glissée à la souris via
+    // #file-list-sidebar-resizer, pas de plancher lié au contenu
+    // (`.file-item-name`/`.file-item-meta` tronquent déjà avec une
+    // ellipse). Bornes en dur dans browser.js (FILE_LIST_SIDEBAR_MIN/MAX),
+    // pas de champ Réglages dédié — le glisser-déposer suffit.
+    fileListSidebarWidth: 320,
+
+    // Titres agrandis dans l'éditeur (round 20bis, retour utilisateur) —
+    // activé par défaut (comportement historique inchangé), réglage
+    // permettant de désactiver l'agrandissement (`.hl-h1`..`.hl-h4`, voir
+    // style.css `.heading-sizes`) tout en gardant la couleur des titres
+    // (`.hl-heading`, jamais conditionnée par ce réglage). Cause racine
+    // des bugs de curseur/sélection décalés (rounds 13/20/20bis) : un
+    // agrandissement désactivé les élimine à la source plutôt que de
+    // continuer à les corriger un par un à chaque nouvelle manifestation.
+    headingSizesEnabled: true
   }
 };
 
@@ -159,7 +184,10 @@ async function maybeRestoreDurableConfig(repo) {
     setEditorMarginY(State.settings.editorMarginY),
     setEditorLineSpacing(State.settings.editorLineSpacing),
     setAutosaveEnabled(State.settings.autosaveEnabled),
-    setTocSidebarMode(State.settings.tocSidebarMode)
+    setTocSidebarMode(State.settings.tocSidebarMode),
+    setFileListSidebarMode(State.settings.fileListSidebarMode),
+    setFileListSidebarWidth(State.settings.fileListSidebarWidth),
+    setHeadingSizesEnabled(State.settings.headingSizesEnabled)
   ]);
 }
 
@@ -181,7 +209,7 @@ function activeRepository() {
 async function loadState() {
   const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, themeMode,
     language, editorFontFamily, editorFontSize, editorMarginX, editorMarginY, editorLineSpacing, autosaveEnabled,
-    tocSidebarMode] = await Promise.all([
+    tocSidebarMode, fileListSidebarMode, fileListSidebarWidth, headingSizesEnabled] = await Promise.all([
     Storage.getAllRepositories(),
     Storage.getMeta('noteExtensions'),
     Storage.getMeta('noteExtensionsFilterDisabled'),
@@ -197,7 +225,10 @@ async function loadState() {
     Storage.getMeta('editorMarginY'),
     Storage.getMeta('editorLineSpacing'),
     Storage.getMeta('autosaveEnabled'),
-    Storage.getMeta('tocSidebarMode')
+    Storage.getMeta('tocSidebarMode'),
+    Storage.getMeta('fileListSidebarMode'),
+    Storage.getMeta('fileListSidebarWidth'),
+    Storage.getMeta('headingSizesEnabled')
   ]);
   State.repositories = (repos || []).sort((a, b) => a.order - b.order);
   if (noteExtensions !== undefined) State.settings.noteExtensions = noteExtensions;
@@ -218,6 +249,9 @@ async function loadState() {
   if (editorLineSpacing !== undefined) State.settings.editorLineSpacing = editorLineSpacing;
   if (autosaveEnabled !== undefined) State.settings.autosaveEnabled = autosaveEnabled;
   if (tocSidebarMode !== undefined) State.settings.tocSidebarMode = tocSidebarMode;
+  if (fileListSidebarMode !== undefined) State.settings.fileListSidebarMode = fileListSidebarMode;
+  if (fileListSidebarWidth !== undefined) State.settings.fileListSidebarWidth = fileListSidebarWidth;
+  if (headingSizesEnabled !== undefined) State.settings.headingSizesEnabled = headingSizesEnabled;
 
   // Re-verify permission on every repository without prompting — a prompt
   // requires a user gesture, done on demand via reauthorizeRepository().
@@ -245,6 +279,21 @@ async function addRepository(dirHandle) {
 async function setIncludeExtensionInLinks(repo, value) {
   repo.includeExtensionInLinks = value;
   await Storage.putRepository(repo);
+}
+
+// Renomme un dépôt (juste son nom d'affichage, `dirHandle` inchangé) — porté
+// de BrowserViewModel.renameRepository (Android, round 4 côté web /
+// "Options du dépôt"). `State.dirStack[0].name` est capturé une seule fois
+// au moment du scan (`scanActiveRepo`), pas relu dynamiquement depuis
+// `repo.name` — sans cette mise à jour, le fil d'Ariane du navigateur
+// afficherait l'ancien nom jusqu'au prochain changement de dossier.
+async function renameRepository(repo, newName) {
+  const trimmed = newName.trim();
+  if (!trimmed || trimmed === repo.name) return;
+  repo.name = trimmed;
+  await Storage.putRepository(repo);
+  if (State.dirStack.length) State.dirStack[0].name = trimmed;
+  scheduleDurableExport();
 }
 
 async function removeRepository(id) {
@@ -410,5 +459,25 @@ async function setAutosaveEnabled(value) {
 async function setTocSidebarMode(value) {
   State.settings.tocSidebarMode = value;
   await Storage.setMeta('tocSidebarMode', value);
+  scheduleDurableExport();
+}
+
+async function setFileListSidebarMode(value) {
+  State.settings.fileListSidebarMode = value;
+  await Storage.setMeta('fileListSidebarMode', value);
+  scheduleDurableExport();
+}
+
+async function setFileListSidebarWidth(value) {
+  State.settings.fileListSidebarWidth = value;
+  await Storage.setMeta('fileListSidebarWidth', value);
+  applyFileListSidebarWidth();
+  scheduleDurableExport();
+}
+
+async function setHeadingSizesEnabled(value) {
+  State.settings.headingSizesEnabled = value;
+  await Storage.setMeta('headingSizesEnabled', value);
+  document.documentElement.classList.toggle('heading-sizes', value);
   scheduleDurableExport();
 }

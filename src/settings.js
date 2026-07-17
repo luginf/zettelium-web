@@ -36,18 +36,41 @@ const Settings = (() => {
   const MIN_LINE_SPACING = 0.8, MAX_LINE_SPACING = 3.0, LINE_SPACING_STEP = 0.1;
 
   let _returnScreenId = 'repo-screen';
+  let _returnIsStickyWorkspace = false; // voir open()/close() ci-dessous
   let _renderSteppers = () => {}; // reassigned in init(), called from sync()
 
+  // Liste de fichiers épinglée (round 19) : quand `browser-screen` ET
+  // `editor-screen` sont visibles côte à côte (`sticky-workspace-active`),
+  // les Réglages doivent cacher/réafficher LES DEUX ensemble plutôt qu'un
+  // seul `returnScreenId` — sinon `settings-screen` se retrouverait, le
+  // temps de l'aller-retour, coincé dans un <body> resté en `display:flex`
+  // à côté du panneau non caché, au lieu de prendre tout l'écran. La classe
+  // elle-même sert de source de vérité (plutôt que de re-dériver la
+  // condition depuis le réglage + l'écran de retour) : elle ne peut être
+  // présente que si `editor.js` a réellement mis les deux écrans en scène.
   function open(returnScreenId = 'repo-screen') {
     _returnScreenId = returnScreenId;
-    el(returnScreenId).hidden = true;
+    _returnIsStickyWorkspace = document.body.classList.contains('sticky-workspace-active');
+    if (_returnIsStickyWorkspace) {
+      document.body.classList.remove('sticky-workspace-active');
+      el('browser-screen').hidden = true;
+      el('editor-screen').hidden = true;
+    } else {
+      el(returnScreenId).hidden = true;
+    }
     el('settings-screen').hidden = false;
     sync();
   }
 
   function close() {
     el('settings-screen').hidden = true;
-    el(_returnScreenId).hidden = false;
+    if (_returnIsStickyWorkspace) {
+      el('browser-screen').hidden = false;
+      el('editor-screen').hidden = false;
+      document.body.classList.add('sticky-workspace-active');
+    } else {
+      el(_returnScreenId).hidden = false;
+    }
   }
 
   function populateEditorFontOptions() {
@@ -105,6 +128,8 @@ const Settings = (() => {
     _renderSteppers();
     el('settings-autosave').checked = State.settings.autosaveEnabled;
     el('settings-toc-sidebar').checked = State.settings.tocSidebarMode;
+    el('settings-file-list-sidebar').checked = State.settings.fileListSidebarMode;
+    el('settings-heading-sizes').checked = State.settings.headingSizesEnabled;
 
     syncRadioGroup('settings-language', State.settings.language);
 
@@ -188,9 +213,7 @@ const Settings = (() => {
 
   function init() {
     el('repo-settings-btn').innerHTML = Icons.gear();
-    el('browser-settings-btn').innerHTML = Icons.gear();
     el('repo-settings-btn').addEventListener('click', () => open('repo-screen'));
-    el('browser-settings-btn').addEventListener('click', () => open('browser-screen'));
     el('settings-back-btn').addEventListener('click', close);
     // `updateIdPreview()` construit un texte dynamique (I18n.t) — pas
     // couvert par le sweep `data-i18n` générique, statique.
@@ -208,6 +231,8 @@ const Settings = (() => {
     _renderSteppers = () => { renderFontSize(); renderMarginX(); renderMarginY(); renderLineSpacing(); };
     el('settings-autosave').addEventListener('change', e => setAutosaveEnabled(e.target.checked));
     el('settings-toc-sidebar').addEventListener('change', e => setTocSidebarMode(e.target.checked));
+    el('settings-file-list-sidebar').addEventListener('change', e => setFileListSidebarMode(e.target.checked));
+    el('settings-heading-sizes').addEventListener('change', e => setHeadingSizesEnabled(e.target.checked));
 
     el('settings-scheme').addEventListener('change', async e => {
       await setScheme(e.target.value);

@@ -481,6 +481,16 @@ test('extractId returns null when no id is found anywhere', () => {
   assert.equal(ZettelkastenLinks.extractId('note.txt', 'rien à voir ici'), null);
 });
 
+test('findBodyIdOccurrence finds the first id in the body, skipping ones inside existing links', () => {
+  const content = 'Voir [[Autre note.txt|20260101000000]].\nid propre : 20260702143012 puis 20260702143099.';
+  const occ = ZettelkastenLinks.findBodyIdOccurrence(content);
+  assert.equal(content.slice(occ.start, occ.end), '20260702143012');
+});
+
+test('findBodyIdOccurrence returns null when the body has no id (even if the filename would match)', () => {
+  assert.equal(ZettelkastenLinks.findBodyIdOccurrence('rien à voir ici'), null);
+});
+
 test('findLinks extracts target and id from wiki links', () => {
   const links = ZettelkastenLinks.findLinks('Voir [[Autre note.txt|20260101000000]] et [[Encore.txt|20260202000000]].');
   assert.deepEqual(links.map(l => [l.target, l.zkId]), [
@@ -653,4 +663,124 @@ test('INI round-trips editor typography settings (int/float types)', () => {
   assert.equal(settings.editorMarginX, 48);
   assert.equal(settings.editorMarginY, 20);
   assert.equal(settings.editorLineSpacing, 1.7);
+});
+
+// --- EditorFormatting — dérivés 1:1 de EditorFormattingTest.kt (zettelium-
+// android), adaptés à la forme de retour JS ({rangeStart, rangeEnd,
+// replacement, cursorStart, cursorEnd} plutôt qu'un texte entier déjà
+// recombiné — voir editor-formatting.js pour le pourquoi). `applyResult`
+// recombine pour comparer au texte final attendu, comme le ferait
+// l'appelant réel (editor.js) via execCommand('insertText', ...).
+function applyResult(text, r) {
+  return text.slice(0, r.rangeStart) + r.replacement + text.slice(r.rangeEnd);
+}
+
+test('wrapInline wraps a selection with the marker', () => {
+  const r = EditorFormatting.wrapInline('hello world', 6, 11, '**');
+  assert.equal(applyResult('hello world', r), 'hello **world**');
+  assert.equal(r.cursorStart, 8);
+  assert.equal(r.cursorEnd, 13);
+});
+
+test('wrapInline unwraps when the selection includes the markers themselves', () => {
+  const r = EditorFormatting.wrapInline('hello **world**', 6, 15, '**');
+  assert.equal(applyResult('hello **world**', r), 'hello world');
+  assert.equal(r.cursorStart, 6);
+  assert.equal(r.cursorEnd, 11);
+});
+
+test('wrapInline unwraps when selection excludes the markers', () => {
+  const r = EditorFormatting.wrapInline('hello **world**', 8, 13, '**');
+  assert.equal(applyResult('hello **world**', r), 'hello world');
+  assert.equal(r.cursorStart, 6);
+  assert.equal(r.cursorEnd, 11);
+});
+
+test('wrapInline with no selection inserts an empty pair and centers the cursor', () => {
+  const r = EditorFormatting.wrapInline('hello ', 6, 6, '//');
+  assert.equal(applyResult('hello ', r), 'hello ////');
+  assert.equal(r.cursorStart, 8);
+  assert.equal(r.cursorEnd, 8);
+});
+
+test('wrapInline wraps again when the marker is present on only one side', () => {
+  const r = EditorFormatting.wrapInline('**hello world', 2, 7, '**');
+  assert.equal(applyResult('**hello world', r), '****hello** world');
+  assert.equal(r.cursorStart, 4);
+  assert.equal(r.cursorEnd, 9);
+});
+
+test('toggleLinePrefix adds the prefix to every non-blank selected line', () => {
+  const text = 'line one\nline two\nline three';
+  const r = EditorFormatting.toggleLinePrefix(text, 0, text.length, '% ');
+  const result = applyResult(text, r);
+  assert.equal(result, '% line one\n% line two\n% line three');
+  assert.equal(r.cursorStart, 0);
+  assert.equal(r.cursorEnd, result.length);
+});
+
+test('toggleLinePrefix removes the prefix when every selected line already has it', () => {
+  const text = '% line one\n% line two';
+  const r = EditorFormatting.toggleLinePrefix(text, 0, text.length, '% ');
+  assert.equal(applyResult(text, r), 'line one\nline two');
+});
+
+test('toggleLinePrefix on a single cursor position affects only that line', () => {
+  const text = 'first\nsecond\nthird';
+  const cursor = text.indexOf('second') + 2;
+  const r = EditorFormatting.toggleLinePrefix(text, cursor, cursor, '% ');
+  assert.equal(applyResult(text, r), 'first\n% second\nthird');
+});
+
+test('toggleLinePrefix adds the prefix to every line when only some already have it', () => {
+  const text = '% line one\nline two\n% line three';
+  const r = EditorFormatting.toggleLinePrefix(text, 0, text.length, '% ');
+  assert.equal(applyResult(text, r), '% % line one\n% line two\n% % line three');
+});
+
+test('toggleLinePrefix leaves blank lines untouched when adding the prefix', () => {
+  const text = 'line one\n\nline two';
+  const r = EditorFormatting.toggleLinePrefix(text, 0, text.length, '% ');
+  assert.equal(applyResult(text, r), '% line one\n\n% line two');
+});
+
+test('toggleHeading wraps the current line as a level-1 heading', () => {
+  const text = 'Some Title';
+  const r = EditorFormatting.toggleHeading(text, 3, 3, 1);
+  const result = applyResult(text, r);
+  assert.equal(result, '= Some Title =');
+  assert.equal(r.cursorStart, result.length);
+  assert.equal(r.cursorEnd, result.length);
+});
+
+test('toggleHeading wraps with the marker matching the requested level', () => {
+  const r = EditorFormatting.toggleHeading('Some Title', 3, 3, 3);
+  assert.equal(applyResult('Some Title', r), '=== Some Title ===');
+});
+
+test('toggleHeading strips an existing heading of the same level back to plain text', () => {
+  const r = EditorFormatting.toggleHeading('= Some Title =', 3, 3, 1);
+  assert.equal(applyResult('= Some Title =', r), 'Some Title');
+});
+
+test('toggleHeading converts to a different level instead of stacking markers', () => {
+  const r = EditorFormatting.toggleHeading('= Some Title =', 3, 3, 2);
+  assert.equal(applyResult('= Some Title =', r), '== Some Title ==');
+});
+
+test('toggleHeading only touches the line the cursor is on', () => {
+  const text = 'first line\nsecond line\nthird line';
+  const cursor = text.indexOf('second');
+  const r = EditorFormatting.toggleHeading(text, cursor, cursor, 1);
+  assert.equal(applyResult(text, r), 'first line\n= second line =\nthird line');
+});
+
+test('toggleHeading preserves an existing label when converting to a different level', () => {
+  const r = EditorFormatting.toggleHeading('= Some Title =[mylabel]', 3, 3, 2);
+  assert.equal(applyResult('= Some Title =[mylabel]', r), '== Some Title ==[mylabel]');
+});
+
+test('toggleHeading clamps an out-of-range level', () => {
+  const r = EditorFormatting.toggleHeading('Some Title', 3, 3, 9);
+  assert.equal(applyResult('Some Title', r), '===== Some Title =====');
 });

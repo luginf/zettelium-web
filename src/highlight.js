@@ -16,6 +16,10 @@ const Highlight = (() => {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  function escRx(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   // 'g'-flagged copies for iterating all matches on a line — kept separate
   // from the parser's own flagless instances so shared `lastIndex` state
   // never corrupts the parser's single-shot `.exec()` calls.
@@ -58,10 +62,21 @@ const Highlight = (() => {
 
   // \n between spans = line break in the pre's pre-wrap IFC. Trailing \n
   // ensures the overlay's height matches the textarea (empty last line).
-  function highlight(text) {
-    return text.split('\n')
-      .map(line => `<span class="hl-line">${renderLine(line)}</span>`)
-      .join('\n') + '\n';
+  //
+  // `searchTerm` (in-note search, editor.js's Ctrl+F bar): injected as a
+  // post-processing pass over the already-rendered HTML rather than woven
+  // into renderLine() — same technique as writhdeck-web/src/highlight.js,
+  // walking tag/text tokens so matches are only wrapped inside text nodes,
+  // never inside an existing <span class="hl-...">'s markup.
+  function highlight(text, searchTerm) {
+    const out = text.split('\n')
+      .map(line => `<span class="hl-line">${renderLine(line)}</span>`);
+    if (!searchTerm) return out.join('\n') + '\n';
+    const termRx = escRx(escapeHtml(searchTerm));
+    return out.map(line => line.replace(/(<[^>]+>)|([^<]+)/g, (_, tag, chunk) =>
+      tag ? tag : chunk.replace(new RegExp(termRx, 'gi'),
+        m => `<span class="hl-search">${m}</span>`)
+    )).join('\n') + '\n';
   }
 
   return { highlight };

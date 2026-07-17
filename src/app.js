@@ -53,6 +53,16 @@ function applyEditorTypography() {
   root.setProperty('--ed-line-spacing', String(s.editorLineSpacing));
 }
 
+// Largeur du panneau de fichiers épinglé (round 19bis) — variable CSS
+// consommée par `body.sticky-workspace-active #browser-screen` (style.css),
+// même principe que `applyEditorTypography()` ci-dessus : une fonction
+// séparée, appelée à la fois au démarrage et depuis le setter
+// (`setFileListSidebarWidth`, state.js), pour ne pas dupliquer la
+// résolution de la variable CSS à chaque endroit qui touche ce réglage.
+function applyFileListSidebarWidth() {
+  document.documentElement.style.setProperty('--file-list-sidebar-width', State.settings.fileListSidebarWidth + 'px');
+}
+
 async function init() {
   // Utilisée par editor.js pour peindre la sélection comme un `Highlight`
   // (CSS Custom Highlight API) sur l'overlay plutôt que via `::selection` du
@@ -67,6 +77,8 @@ async function init() {
   await Promise.all([loadState(), Themes.loadCustomSchemes()]);
   applyTheme(State.settings.scheme, State.settings.themeMode); // the persisted choice, once known
   applyEditorTypography();
+  applyFileListSidebarWidth();
+  document.documentElement.classList.toggle('heading-sizes', State.settings.headingSizesEnabled);
   I18n.apply();
   Repositories.init();
   Settings.init();

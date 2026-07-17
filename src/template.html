@@ -96,6 +96,20 @@
       </span>
       <span class="switch"><input type="checkbox" id="settings-toc-sidebar"><span class="switch-track"></span></span>
     </label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.fileListSidebarLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.fileListSidebarDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-file-list-sidebar"><span class="switch-track"></span></span>
+    </label>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.headingSizesLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.headingSizesDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-heading-sizes"><span class="switch-track"></span></span>
+    </label>
 
     <p class="settings-section-title" data-i18n="settings.sectionLanguage"></p>
     <div class="settings-radio-group" id="settings-language">
@@ -182,11 +196,15 @@
   <div id="browser-header">
     <button id="browser-back-btn" data-i18n-title="browser.backTooltip">←</button>
     <span id="browser-title"></span>
-    <button id="browser-options-btn" data-i18n-title="browser.repoOptionsTooltip">⋮</button>
-    <button id="browser-repair-btn" data-i18n-title="browser.repairTooltip" class="icon-btn"></button>
-    <button id="browser-new-btn" data-i18n-title="browser.newNoteTooltip">+</button>
     <button id="browser-refresh-btn" data-i18n-title="browser.refreshTooltip">⟳</button>
-    <button id="browser-settings-btn" data-i18n-title="common.settings" class="icon-btn"></button>
+    <div id="browser-menu-wrap">
+      <button id="browser-menu-btn" data-i18n-title="browser.moreTooltip">⋮</button>
+      <div id="browser-menu" hidden>
+        <button id="browser-menu-repo-options" class="icon-label-btn action-row"></button>
+        <button id="browser-menu-new-note" class="icon-label-btn action-row"></button>
+        <button id="browser-menu-settings" class="icon-label-btn action-row"></button>
+      </div>
+    </div>
   </div>
   <div id="browser-search-bar">
     <div id="browser-search-mode">
@@ -202,6 +220,11 @@
   <div id="browser-list"></div>
 </div>
 
+<!-- Poignée de redimensionnement du panneau de fichiers épinglé (round
+     19bis) — n'existe visuellement (voir style.css) que pendant que
+     `body.sticky-workspace-active` est posée par editor.js. -->
+<div id="file-list-sidebar-resizer" data-i18n-title="browser.resizeSidebarTooltip"></div>
+
 <!-- Repository options -->
 <dialog id="repo-options-dlg">
   <div id="repo-options-header">
@@ -209,6 +232,17 @@
     <button id="repo-options-close" data-i18n-title="common.close">✕</button>
   </div>
   <div id="repo-options-body">
+    <label class="settings-row"><span data-i18n="browser.repoNameLabel"></span>
+      <input type="text" id="repo-options-name-input" autocomplete="off">
+      <button id="repo-options-rename-save" data-i18n-title="common.rename" class="icon-btn"></button>
+    </label>
+
+    <hr class="dialog-hr">
+
+    <button id="repo-options-repair" class="icon-label-btn action-row"></button>
+
+    <hr class="dialog-hr">
+
     <label class="settings-row settings-switch-row">
       <span class="settings-row-info">
         <span data-i18n="browser.includeExtensionLabel"></span>
@@ -221,50 +255,96 @@
 
 <!-- Editor screen -->
 <div id="editor-screen" hidden>
-  <div id="ed-header">
-    <button id="editor-back-btn" data-i18n-title="editor.closeTooltip">✕</button>
-    <span id="editor-title"></span>
-    <div id="ed-actions">
-      <button id="editor-toc-btn" data-i18n-title="editor.tocTooltip" class="icon-btn"></button>
-      <button id="editor-backlinks-btn" data-i18n-title="editor.backlinksTooltip" class="icon-btn">
-        <span id="editor-backlinks-badge" class="editor-badge" hidden></span>
-        <span id="editor-backlinks-icon"></span>
-      </button>
-      <button id="editor-preview-btn" data-i18n-title="editor.previewTooltip" class="icon-btn"></button>
-      <button id="editor-save-btn" data-i18n-title="editor.saveTooltip" class="icon-btn" disabled></button>
-      <div id="editor-menu-wrap">
-        <button id="editor-menu-btn" data-i18n-title="editor.moreTooltip">⋮</button>
-        <div id="editor-menu" hidden>
-          <button id="editor-menu-insert-id" class="icon-label-btn"></button>
-          <button id="editor-menu-insert-link" class="icon-label-btn"></button>
-          <button id="editor-menu-rename" class="icon-label-btn"></button>
-          <button id="editor-menu-backup-create" class="icon-label-btn"></button>
-          <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
-          <button id="editor-menu-settings" class="icon-label-btn"></button>
+  <!-- Contenu réel d'une note ouverte — enveloppé (round 19, liste de
+       fichiers épinglée) pour pouvoir basculer vers #editor-empty-state
+       sans toucher à `editor-screen` lui-même, qui doit rester visible en
+       mode panneau épinglé même quand aucune note n'est ouverte. -->
+  <div id="editor-note-view">
+    <div id="ed-header">
+      <button id="editor-back-btn" data-i18n-title="editor.closeTooltip">✕</button>
+      <span id="editor-title"></span>
+      <div id="ed-actions">
+        <button id="editor-toc-btn" data-i18n-title="editor.tocTooltip" class="icon-btn"></button>
+        <button id="editor-backlinks-btn" data-i18n-title="editor.backlinksTooltip" class="icon-btn">
+          <span id="editor-backlinks-badge" class="editor-badge" hidden></span>
+          <span id="editor-backlinks-icon"></span>
+        </button>
+        <button id="editor-preview-btn" data-i18n-title="editor.previewTooltip" class="icon-btn"></button>
+        <button id="editor-save-btn" data-i18n-title="editor.saveTooltip" class="icon-btn" disabled></button>
+        <div id="editor-menu-wrap">
+          <button id="editor-menu-btn" data-i18n-title="editor.moreTooltip">⋮</button>
+          <div id="editor-menu" hidden>
+            <button id="editor-menu-search" class="icon-label-btn"></button>
+            <button id="editor-menu-insert-id" class="icon-label-btn"></button>
+            <button id="editor-menu-insert-link" class="icon-label-btn"></button>
+            <button id="editor-menu-goto-id" class="icon-label-btn"></button>
+            <button id="editor-menu-rename" class="icon-label-btn"></button>
+            <button id="editor-menu-backup-create" class="icon-label-btn"></button>
+            <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
+            <button id="editor-menu-settings" class="icon-label-btn"></button>
+          </div>
         </div>
       </div>
     </div>
+    <div id="ed-search-bar" hidden>
+      <input id="ed-search-input" type="text" autocomplete="off" data-i18n-placeholder="editor.searchPlaceholder">
+      <span id="ed-search-count"></span>
+      <button id="ed-search-prev" class="icon-btn" data-i18n-title="editor.searchPrevTooltip">▲</button>
+      <button id="ed-search-next" class="icon-btn" data-i18n-title="editor.searchNextTooltip">▼</button>
+      <button id="ed-search-close" class="icon-btn" data-i18n-title="common.close">✕</button>
+    </div>
+    <div id="ed-body">
+      <div id="ed-main">
+        <div id="ed-wrap">
+          <pre id="ed-highlight" aria-hidden="true"></pre>
+          <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+          <!-- Faux caret peint par-dessus l'overlay (round "curseur décalé") —
+               voir le commentaire de `updateCaretIndicator()` dans editor.js :
+               le vrai caret natif du textarea (caret-color) utilise les
+               métriques de police UNIFORMES du textarea, qui divergent de
+               l'overlay dès qu'un titre plus haut dans le texte (taille
+               agrandie) précède la ligne courante — même cause racine que le
+               décalage de sélection déjà corrigé (round 13), jamais traitée
+               pour le caret lui-même jusqu'ici. -->
+          <div id="ed-caret" hidden></div>
+          <!-- Menu contextuel (clic droit) de formatage — porté d'Android
+               (EditorScreen.kt : ActionMode.Callback + EditorFormatting.kt),
+               même liste/ordre. "Suivre le lien" masqué sauf si la
+               sélection/le curseur chevauche un lien [[cible|zkId]]. -->
+          <div id="ed-context-menu" hidden>
+            <button id="ed-ctx-follow-link" class="icon-label-btn action-row" hidden></button>
+            <button id="ed-ctx-h1" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-h2" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-h3" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-bold" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-italic" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-underline" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-strike" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-comment" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-date" class="icon-label-btn action-row"></button>
+          </div>
+        </div>
+        <div id="ed-preview" hidden></div>
+      </div>
+      <!-- Panneau TOC latéral (réglage settings.tocSidebarMode) — sur le
+           modèle de writhdeck-web : colonne flex fixe, jamais en surimpression.
+           Reste ouvert après un clic sur un titre ; se referme via le bouton
+           "✕" ou en ré-appuyant sur l'icône TOC de la barre d'outils. -->
+      <div id="toc-panel" hidden>
+        <div id="toc-panel-header">
+          <span data-i18n="editor.tocTooltip"></span>
+          <button id="toc-panel-close-btn" data-i18n-title="common.close" class="icon-btn">✕</button>
+        </div>
+        <p id="toc-panel-empty-hint" class="hint" data-i18n="editor.tocEmptyHint" hidden></p>
+        <div id="toc-panel-list"></div>
+      </div>
+    </div>
   </div>
-  <div id="ed-body">
-    <div id="ed-main">
-      <div id="ed-wrap">
-        <pre id="ed-highlight" aria-hidden="true"></pre>
-        <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
-      </div>
-      <div id="ed-preview" hidden></div>
-    </div>
-    <!-- Panneau TOC latéral (réglage settings.tocSidebarMode) — sur le
-         modèle de writhdeck-web : colonne flex fixe, jamais en surimpression.
-         Reste ouvert après un clic sur un titre ; se referme via le bouton
-         "✕" ou en ré-appuyant sur l'icône TOC de la barre d'outils. -->
-    <div id="toc-panel" hidden>
-      <div id="toc-panel-header">
-        <span data-i18n="editor.tocTooltip"></span>
-        <button id="toc-panel-close-btn" data-i18n-title="common.close" class="icon-btn">✕</button>
-      </div>
-      <p id="toc-panel-empty-hint" class="hint" data-i18n="editor.tocEmptyHint" hidden></p>
-      <div id="toc-panel-list"></div>
-    </div>
+  <!-- Affiché à la place de #editor-note-view quand la liste de fichiers
+       est épinglée (settings.fileListSidebarMode) et qu'aucune note n'est
+       actuellement ouverte — voir editor.js `close()`. -->
+  <div id="editor-empty-state" hidden>
+    <p data-i18n="editor.emptyStateHint"></p>
   </div>
 </div>
 
@@ -364,9 +444,11 @@
     <button id="note-actions-close" data-i18n-title="common.close">✕</button>
   </div>
   <div id="note-actions-body">
-    <button id="note-actions-rename" class="icon-label-btn"></button>
-    <button id="note-actions-move" class="icon-label-btn"></button>
-    <button id="note-actions-delete" class="icon-label-btn"></button>
+    <button id="note-actions-rename" class="icon-label-btn action-row"></button>
+    <button id="note-actions-move" class="icon-label-btn action-row"></button>
+    <button id="note-actions-duplicate" class="icon-label-btn action-row"></button>
+    <button id="note-actions-new" class="icon-label-btn action-row"></button>
+    <button id="note-actions-delete" class="icon-label-btn action-row"></button>
   </div>
 </dialog>
 

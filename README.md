@@ -6,14 +6,15 @@ This is the web port of `zettelium-android`, built with the same single-file, no
 
 ## Try it online
 
-- https://luginf.github.io/zettelium-web/zettelium.html
+- [https://luginf.github.io/zettelium-web/zettelium.html](https://luginf.github.io/zettelium-web/zettelium.html)
 
 
 ## Features
 
 - **Multiple repositories**: each one is a real folder on your disk, opened via the File System Access API — no data lives anywhere but your own filesystem.
 - **txt2tags syntax** with live syntax highlighting and a real HTML preview, from a parser ported directly from the Android app's Kotlin implementation.
-- **Zettelkasten linking**: `[[target|id]]` links, configurable ID generation format and detection pattern, a backlinks panel, and a link-repair action that fixes stale links after a rename/move.
+- **Zettelkasten linking**: `[[target|id]]` links, configurable ID generation format and detection pattern, a backlinks panel, and a link-repair action that fixes stale links after a rename/move. Follow a link straight from edit mode via the right-click menu, not just from the preview.
+- **Right-click formatting menu**: heading levels 1-3, bold, italic, underline, strikethrough, and comment, applied to the current selection.
 - **Search**: by name, content, or `#tag`, scoped to the active repository and covering all subfolders regardless of which one you're browsing.
 - **Subfolder navigation** within a repository, file-manager style.
 - **Full note management**: create, rename, move (to another folder or repository), and delete notes directly from the browser.
@@ -21,11 +22,21 @@ This is the web port of `zettelium-android`, built with the same single-file, no
 - **Cursor position** is remembered per note and restored when you reopen it.
 - **Backups**: create a timestamped copy of a note on demand, and restore from its backup history.
 - **8 built-in color schemes** (dark/light variants) plus a full custom-scheme editor.
-- **Configurable editor typography**: font family/size, margins, line spacing — with direct numeric entry, not just +/- steppers.
+- **Configurable editor typography**: font family/size, margins, line spacing — with direct numeric entry, not just +/- steppers. Heading size enlargement can be turned off (keeps heading color) if the cursor/selection ever look offset on a note with several headings.
 - **Autosave** (opt-in, debounced, off by default).
 - **Table of contents**: either a quick modal popup, or an optional persistent side panel that docks next to the editor.
+- **Pinned file list** (opt-in): keeps the file browser visible as a sidebar next to the editor once you open a note, for quick navigation between notes.
 - **FR/EN interface language**, following the system language or set explicitly.
 - **Durable `.ini` config** written to the primary repository, so settings survive a browser data wipe (the repository folders themselves still need to be re-authorized once, a File System Access API constraint that can't be worked around).
+
+### Which ID counts as "the" note's Zettelkasten ID?
+
+If more than one string in a note matches the configured detection pattern, precedence is:
+
+1. **The file name wins outright** if it matches — the note's body isn't even checked in that case.
+2. Otherwise, existing `[[target|id]]` links are stripped from the body first (so a link *pointing at* another note's ID is never mistaken for this note's own ID), and the **first match found scanning the body top to bottom** is used.
+
+Any other matching strings further down are silently ignored — there's no conflict warning.
 
 ## Build
 

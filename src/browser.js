@@ -112,9 +112,20 @@ const Browser = (() => {
     el('browser-title').textContent = State.dirStack.map(s => s.name).join(' / ');
   }
 
-  function renderFileRow(file) {
+  // `searchTerm` : passé seulement pour un résultat de recherche de CONTENU
+  // (voir render() plus bas) — au clic, la note s'ouvre directement sur la
+  // première occurrence du terme trouvé plutôt que de laisser l'utilisateur
+  // la rechercher à la main dans le texte.
+  function renderFileRow(file, searchTerm) {
     const item = document.createElement('div');
     item.className = 'file-item';
+    // Surligne la note actuellement ouverte dans le panneau épinglé
+    // (round 19) — sans effet hors de ce mode (Editor.currentPath() est
+    // toujours `null` tant qu'aucune note n'est ouverte à côté du
+    // navigateur, ce qui n'arrive jamais hors mode épinglé).
+    if (State.settings.fileListSidebarMode && Editor.currentPath() === file.path) {
+      item.classList.add('file-item-active');
+    }
 
     const name = document.createElement('span');
     name.className = 'file-item-name';
@@ -139,13 +150,20 @@ const Browser = (() => {
     });
     item.appendChild(actionsBtn);
 
-    item.addEventListener('click', () => Editor.open(file));
+    // `openOther` (pas `open` direct) : avec le panneau épinglé (round 19),
+    // cette ligne peut rester cliquable pendant qu'une AUTRE note, déjà
+    // ouverte dans le panneau, a des modifications non enregistrées.
+    item.addEventListener('click', () => Editor.openOther(file, searchTerm ? { searchTerm } : undefined));
     return item;
   }
 
-  // --- Menu d'actions par note (Renommer / Déplacer / Supprimer) -------------
+  // --- Menu d'actions par note (Renommer / Déplacer / Dupliquer / Nouvelle
+  // note / Supprimer) -----------------------------------------------------
   // Porté de BrowserScreen.kt : `fileForActions` (menu) -> `fileToRename`/
-  // `fileToMove`/`fileToDelete` (dialogues dédiés), même ordre.
+  // `fileToMove`/`fileToDelete` (dialogues dédiés), même ordre. "Dupliquer"
+  // et "Nouvelle note" n'ont pas d'équivalent à cet endroit côté Android —
+  // ajoutés ici sur demande explicite, juste avant "Supprimer" (qui reste
+  // en dernier, seule action destructrice du menu).
 
   function openNoteActions(file) {
     _actionsFile = file;
@@ -194,6 +212,50 @@ const Browser = (() => {
       await Index.indexRepository(repo, { forceFull: true });
     } catch (e) {
       console.error('Échec de la réindexation après renommage', e);
+    }
+    await rescan();
+  }
+
+  // Duplique une note dans son dossier d'origine, suffixe `_copy` inséré
+  // juste avant l'extension (ex. "note.txt" -> "note_copy.txt"). Bloque
+  // (plutôt que d'écraser silencieusement, `getFileHandle(create:true)`
+  // de FSA ne suffixe pas automatiquement en cas de collision comme SAF
+  // côté Android) si ce nom existe déjà — l'utilisateur peut alors
+  // renommer la copie existante avant de réessayer.
+  async function duplicateFromActions() {
+    const file = _actionsFile;
+    closeNoteActions();
+    if (!file) return;
+    const repo = activeRepository();
+    if (!repo) return;
+
+    const dotIndex = file.name.lastIndexOf('.');
+    const base = dotIndex > 0 ? file.name.slice(0, dotIndex) : file.name;
+    const ext = dotIndex > 0 ? file.name.slice(dotIndex) : '';
+    const newName = `${base}_copy${ext}`;
+
+    try {
+      const parentDir = await FSA.getParentDirHandle(repo.dirHandle, file.path);
+      let exists = true;
+      try {
+        await parentDir.getFileHandle(newName);
+      } catch (e) {
+        exists = false;
+      }
+      if (exists) {
+        alert(I18n.t('browser.duplicateAlreadyExists', { name: newName }));
+        return;
+      }
+      const content = await FSA.readFileText(file.fileHandle);
+      await FSA.writeNewFile(parentDir, newName, content);
+    } catch (e) {
+      alert(I18n.t('browser.duplicateFailed', { error: e.message }));
+      return;
+    }
+    try {
+      await Index.indexRepository(repo, { forceFull: true });
+    } catch (e) {
+      console.error('Échec de la réindexation après duplication', e);
     }
     await rescan();
   }
@@ -414,7 +476,8 @@ const Browser = (() => {
       : [];
     el('browser-empty-hint').hidden = results.length > 0;
     el('browser-empty-hint').textContent = I18n.t('browser.emptyHintNoResults');
-    results.forEach(file => list.appendChild(renderFileRow(file)));
+    const jumpTerm = _searchMode === 'content' ? query : undefined;
+    results.forEach(file => list.appendChild(renderFileRow(file, jumpTerm)));
   }
 
   function scheduleRender() {
@@ -439,12 +502,13 @@ const Browser = (() => {
   async function reindexActive() {
     const repo = activeRepository();
     if (!repo) return;
-    el('browser-repair-btn').disabled = true;
+    el('repo-options-repair').disabled = true;
     try {
       await Index.indexRepository(repo);
       render(); // refresh in case a search was already active
     } finally {
-      el('browser-repair-btn').disabled = false;
+      el('repo-options-repair').disabled = false;
+      updateRepairButtonLabel();
     }
   }
 
@@ -457,9 +521,41 @@ const Browser = (() => {
   // Porté de BrowserScreen.kt (round 10 Android) : bouton "+" -> dialogue de
   // nom -> création dans le dossier actuellement affiché -> ouverture directe
   // dans l'éditeur (contrairement à writhdeck-android, qui se contente de
-  // rafraîchir la liste).
+  // rafraîchir la liste). Round 16 (retour utilisateur) : la même action est
+  // aussi accessible depuis le menu ⋮ d'une note existante, pour créer dans
+  // SON dossier sans remonter à la racine si on navigue dans un sous-dossier
+  // — `_newNoteTarget` porte donc le dossier cible explicitement plutôt que
+  // de toujours supposer "le dossier actuellement affiché".
+
+  let _newNoteTarget = null; // {handle, path} — dossier où la nouvelle note sera créée
 
   function openNewNoteDialog() {
+    _newNoteTarget = { handle: currentDirHandle(), path: currentDirPath() };
+    el('new-note-input').value = '';
+    el('new-note-dlg').showModal();
+    el('new-note-input').focus();
+  }
+
+  // `_actionsFile` peut venir d'un résultat de recherche (portée récursive),
+  // pas forcément du dossier actuellement affiché — on vise donc TOUJOURS le
+  // dossier réel de la note ciblée, jamais `currentDirHandle()`.
+  async function openNewNoteDialogFromActions() {
+    const file = _actionsFile;
+    closeNoteActions();
+    if (!file) return;
+    const repo = activeRepository();
+    if (!repo) return;
+    const parts = file.path.split('/').filter(Boolean);
+    parts.pop();
+    const dirPath = parts.length ? parts.join('/') + '/' : '';
+    let handle;
+    try {
+      handle = await FSA.getParentDirHandle(repo.dirHandle, file.path);
+    } catch (e) {
+      alert(I18n.t('browser.newNoteFailed', { error: e.message }));
+      return;
+    }
+    _newNoteTarget = { handle, path: dirPath };
     el('new-note-input').value = '';
     el('new-note-dlg').showModal();
     el('new-note-input').focus();
@@ -468,27 +564,40 @@ const Browser = (() => {
   async function confirmNewNote() {
     const raw = el('new-note-input').value.trim();
     el('new-note-dlg').close();
-    if (!raw) return;
+    const target = _newNoteTarget;
+    if (!raw || !target) return;
     const repo = activeRepository();
     if (!repo) return;
 
     const extensions = noteExtensionsList();
     const hasRecognisedExt = extensions.some(ext => raw.toLowerCase().endsWith(ext));
     const finalName = hasRecognisedExt ? raw : raw + (extensions[0] || '');
-    if (State.repoFiles.some(f => f.name.toLowerCase() === finalName.toLowerCase())) {
+    // Liste réelle du dossier CIBLE (pas `State.repoFiles`, qui ne reflète
+    // que le dossier actuellement affiché — peut différer de la cible
+    // quand on vient du menu ⋮ d'une note d'un autre dossier), tous
+    // fichiers confondus (pas seulement les notes reconnues) pour ne
+    // jamais silencieusement réutiliser/écraser un fichier existant.
+    let siblings;
+    try {
+      ({ files: siblings } = await FSA.listChildren(target.handle, [], true));
+    } catch (e) {
+      alert(I18n.t('browser.newNoteFailed', { error: e.message }));
+      return;
+    }
+    if (siblings.some(f => f.name.toLowerCase() === finalName.toLowerCase())) {
       alert(I18n.t('browser.newNoteAlreadyExists', { name: finalName }));
       return;
     }
 
     let created;
     try {
-      created = await FSA.createNoteFile(currentDirHandle(), raw, extensions);
+      created = await FSA.createNoteFile(target.handle, raw, extensions);
     } catch (e) {
       alert(I18n.t('browser.newNoteFailed', { error: e.message }));
       return;
     }
     const file = {
-      path: currentDirPath() + created.name, name: created.name,
+      path: target.path + created.name, name: created.name,
       fileHandle: created.handle, lastModified: Date.now()
     };
     try {
@@ -496,18 +605,32 @@ const Browser = (() => {
     } catch (e) {
       console.error('Échec de l\'indexation de la nouvelle note', e);
     }
-    Editor.open(file);
+    // `openOther` : voir le commentaire de renderFileRow — même risque en
+    // panneau épinglé si une AUTRE note dirty était déjà ouverte.
+    Editor.openOther(file);
+  }
+
+  // Ligne de texte cliquable dans "Options du dépôt" (jamais une icône
+  // isolée dans la barre — demande explicite : rien de potentiellement
+  // destructif en accès direct sans contexte). Reste désactivée + relabellisée
+  // pendant l'exécution (même retour visuel qu'Android : `isRepairingLinks`),
+  // le dialogue reste ouvert derrière l'alerte de résultat.
+  function updateRepairButtonLabel() {
+    const btn = el('repo-options-repair');
+    btn.innerHTML = `${Icons.wrench()} ${I18n.t(btn.disabled ? 'browser.repairingLabel' : 'browser.repairLinksLabel')}`;
   }
 
   async function repairAllLinks() {
     const repo = activeRepository();
     if (!repo) return;
-    el('browser-repair-btn').disabled = true;
+    el('repo-options-repair').disabled = true;
+    updateRepairButtonLabel();
     try {
       const count = await Index.repairAllLinks(repo.id, repo);
       alert(count > 0 ? I18n.t('browser.repairDone', { count }) : I18n.t('browser.repairNothing'));
     } finally {
-      el('browser-repair-btn').disabled = false;
+      el('repo-options-repair').disabled = false;
+      updateRepairButtonLabel();
     }
   }
 
@@ -530,6 +653,8 @@ const Browser = (() => {
   function syncRepoOptionsUI() {
     const repo = activeRepository();
     el('repo-options-include-extension').checked = !!(repo && repo.includeExtensionInLinks);
+    el('repo-options-name-input').value = repo ? repo.name : '';
+    updateRepairButtonLabel();
   }
 
   function openRepoOptions() {
@@ -538,12 +663,50 @@ const Browser = (() => {
     el('repo-options-dlg').showModal();
   }
 
+  async function confirmRenameRepositoryFromOptions() {
+    const repo = activeRepository();
+    if (!repo) return;
+    await renameRepository(repo, el('repo-options-name-input').value);
+    el('repo-options-name-input').value = repo.name;
+    render(); // le titre du navigateur (fil d'Ariane) reflète le nouveau nom
+  }
+
+  // --- Menu "⋮" du navigateur (Options du dépôt / Nouvelle note / Réglages) -
+  // Consolide trois points d'entrée auparavant en icônes séparées dans la
+  // barre — demande explicite : ne rien laisser en accès direct sans
+  // libellé explicite, en particulier "Réparer les liens" (potentiellement
+  // long/perturbateur), désormais une ligne texte DANS le dialogue "Options
+  // du dépôt", jamais une icône cliquable isolée. Même mécanisme
+  // ouvrir/fermer/clic-extérieur/Échap que `editor.js`'s `#editor-menu`.
+
+  function openBrowserMenu() {
+    el('browser-menu').hidden = false;
+  }
+
+  function closeBrowserMenu() {
+    el('browser-menu').hidden = true;
+  }
+
+  function toggleBrowserMenu() {
+    el('browser-menu').hidden ? openBrowserMenu() : closeBrowserMenu();
+  }
+
+  function runBrowserMenuAction(fn) {
+    return () => { closeBrowserMenu(); fn(); };
+  }
+
   // Back button goes up one folder first, like a normal file manager —
   // only leaves the repository entirely once already at its root (mirrors
   // Android's BrowserScreen: "navigateUp() renvoie false à la racine, seul
   // cas où l'écran se quitte réellement").
   async function backOrUp() {
     if (await dirUp()) { render(); return; }
+    // Liste de fichiers épinglée (round 19) : une note ouverte (et non
+    // enregistrée) dans le panneau peut encore être là au moment où on
+    // quitte le dépôt depuis la racine — même garde-fou "enregistrer avant
+    // de quitter" que partout ailleurs. No-op sûr hors mode épinglé (aucune
+    // note n'est jamais ouverte à cet instant dans le mode historique).
+    if (!(await Editor.requestClose())) return;
     Repositories.showList();
   }
 
@@ -554,23 +717,83 @@ const Browser = (() => {
   function refreshI18nLabels() {
     el('note-actions-rename').innerHTML = `${Icons.edit()} ${I18n.t('common.rename')}`;
     el('note-actions-move').innerHTML = `${Icons.folder()} ${I18n.t('browser.moveTitle')}`;
+    el('note-actions-duplicate').innerHTML = `${Icons.copy()} ${I18n.t('common.duplicate')}`;
+    el('note-actions-new').innerHTML = `${Icons.filePlus()} ${I18n.t('browser.newNoteTitle')}`;
     el('note-actions-delete').innerHTML = `${Icons.trash()} ${I18n.t('common.delete')}`;
     el('note-rename-confirm').innerHTML = `${Icons.save()} ${I18n.t('common.rename')}`;
+    el('browser-menu-repo-options').innerHTML = `${Icons.gear()} ${I18n.t('browser.repoOptionsTitle')}`;
+    el('browser-menu-new-note').innerHTML = `${Icons.filePlus()} ${I18n.t('browser.newNoteTitle')}`;
+    el('browser-menu-settings').innerHTML = `${Icons.gear()} ${I18n.t('common.settings')}`;
+    el('repo-options-rename-save').innerHTML = Icons.save();
+    updateRepairButtonLabel();
     updateSortButton();
     el('browser-search-input').placeholder = searchPlaceholder(_searchMode);
   }
 
+  // --- Redimensionnement du panneau de fichiers épinglé (round 19bis) ------
+  // Pas de plancher lié au contenu (demande explicite : "même si c'est plus
+  // petit que la longueur du titre de la plus longue note") — seules ces
+  // bornes fixes s'appliquent. Live pendant le glisser (variable CSS mise à
+  // jour à chaque `mousemove`, pas de re-render coûteux) ; persisté une
+  // seule fois au relâchement (`setFileListSidebarWidth`), pas à chaque
+  // pixel glissé.
+  const FILE_LIST_SIDEBAR_MIN = 160;
+  const FILE_LIST_SIDEBAR_MAX = 640;
+
+  function wireSidebarResizer() {
+    const handle = el('file-list-sidebar-resizer');
+    let dragWidth = null;
+
+    function clamp(px) {
+      return Math.min(FILE_LIST_SIDEBAR_MAX, Math.max(FILE_LIST_SIDEBAR_MIN, px));
+    }
+
+    handle.addEventListener('mousedown', e => {
+      dragWidth = State.settings.fileListSidebarWidth;
+      handle.classList.add('resizing');
+      document.body.style.userSelect = 'none'; // évite de sélectionner le texte en dessous pendant le glisser
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (dragWidth === null) return;
+      const rect = el('browser-screen').getBoundingClientRect();
+      dragWidth = clamp(e.clientX - rect.left);
+      document.documentElement.style.setProperty('--file-list-sidebar-width', dragWidth + 'px');
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (dragWidth === null) return;
+      handle.classList.remove('resizing');
+      document.body.style.userSelect = '';
+      setFileListSidebarWidth(dragWidth);
+      dragWidth = null;
+    });
+  }
+
   function init() {
-    el('browser-repair-btn').innerHTML = Icons.wrench();
     el('browser-tags-btn').innerHTML = Icons.tag();
+    wireSidebarResizer();
     refreshI18nLabels();
     document.addEventListener('i18n:apply', refreshI18nLabels);
 
     el('browser-back-btn').addEventListener('click', backOrUp);
     el('browser-refresh-btn').addEventListener('click', async () => { await rescan(); reindexActive(); });
-    el('browser-repair-btn').addEventListener('click', repairAllLinks);
     el('browser-sort-btn').addEventListener('click', toggleSort);
-    el('browser-new-btn').addEventListener('click', openNewNoteDialog);
+
+    el('browser-menu-btn').addEventListener('click', toggleBrowserMenu);
+    el('browser-menu-repo-options').addEventListener('click', runBrowserMenuAction(openRepoOptions));
+    el('browser-menu-new-note').addEventListener('click', runBrowserMenuAction(openNewNoteDialog));
+    el('browser-menu-settings').addEventListener('click', runBrowserMenuAction(() => Settings.open('browser-screen')));
+    document.addEventListener('click', e => {
+      if (el('browser-menu').hidden) return;
+      if (e.target === el('browser-menu-btn') || el('browser-menu').contains(e.target)) return;
+      closeBrowserMenu();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !el('browser-menu').hidden) closeBrowserMenu();
+    });
+
     el('new-note-cancel').addEventListener('click', () => el('new-note-dlg').close());
     el('new-note-create').addEventListener('click', confirmNewNote);
     el('new-note-input').addEventListener('keydown', e => { if (e.key === 'Enter') confirmNewNote(); });
@@ -578,6 +801,8 @@ const Browser = (() => {
     el('note-actions-close').addEventListener('click', closeNoteActions);
     el('note-actions-rename').addEventListener('click', openRenameFromActions);
     el('note-actions-move').addEventListener('click', () => { const f = _actionsFile; closeNoteActions(); if (f) openMoveDialog(f); });
+    el('note-actions-duplicate').addEventListener('click', duplicateFromActions);
+    el('note-actions-new').addEventListener('click', openNewNoteDialogFromActions);
     el('note-actions-delete').addEventListener('click', deleteFromActions);
 
     el('note-rename-cancel').addEventListener('click', () => el('note-rename-dlg').close());
@@ -607,8 +832,10 @@ const Browser = (() => {
     el('browser-tags-btn').addEventListener('click', openTagBrowser);
     el('tag-browser-close').addEventListener('click', () => el('tag-browser-dlg').close());
 
-    el('browser-options-btn').addEventListener('click', openRepoOptions);
     el('repo-options-close').addEventListener('click', () => el('repo-options-dlg').close());
+    el('repo-options-rename-save').addEventListener('click', confirmRenameRepositoryFromOptions);
+    el('repo-options-name-input').addEventListener('keydown', e => { if (e.key === 'Enter') confirmRenameRepositoryFromOptions(); });
+    el('repo-options-repair').addEventListener('click', repairAllLinks);
     el('repo-options-include-extension').addEventListener('change', async e => {
       const repo = activeRepository();
       if (!repo) return;

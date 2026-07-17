@@ -1,0 +1,11 @@
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editor cruft
+*.swp
+*~
+
+# Python (build.py is run as a script, not imported, but ignore defensively)
+__pycache__/
+*.pyc
