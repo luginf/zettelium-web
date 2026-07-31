@@ -42,6 +42,25 @@ const Highlight = (() => {
     return null;
   }
 
+  // Code block awareness (round 36) — same 3 open/close delimiter pairs the
+  // parser uses (parser.js), tracked as a tiny open/closed state carried
+  // from one line to the next. No markup/title/comment span is emitted for
+  // any line inside a code block (opening/closing lines included), matching
+  // the preview (render.js's CodeBlockView equivalent treats CodeBlock as
+  // opaque text) — a previous version of this file kept applying markup
+  // highlighting even inside verbatim blocks, inconsistent with the preview.
+  // Wrapped in `hl-code` (round 22, user request) so it can be colored like
+  // `hl-comment` — same var(--comment), a code block is "not prose" in the
+  // same sense a comment is.
+  const CODE_BLOCK_PAIRS = [
+    { open: Txt2TagsRegexes.blockVerbOpen, close: Txt2TagsRegexes.blockVerbClose },
+    { open: Txt2TagsRegexes.blockRawOpen, close: Txt2TagsRegexes.blockRawClose },
+    { open: Txt2TagsRegexes.blockTaggedOpen, close: Txt2TagsRegexes.blockTaggedClose },
+  ];
+  const ONE_LINE_REGEXES = [
+    Txt2TagsRegexes.oneLineVerb, Txt2TagsRegexes.oneLineRaw, Txt2TagsRegexes.oneLineTagged,
+  ];
+
   function renderLine(line) {
     const esc = escapeHtml(line);
     if (line.startsWith('%')) {
@@ -69,8 +88,24 @@ const Highlight = (() => {
   // walking tag/text tokens so matches are only wrapped inside text nodes,
   // never inside an existing <span class="hl-...">'s markup.
   function highlight(text, searchTerm) {
-    const out = text.split('\n')
-      .map(line => `<span class="hl-line">${renderLine(line)}</span>`);
+    let closeRegex = null; // non-null = currently inside a code block
+    const out = text.split('\n').map(line => {
+      let opaque = false;
+      if (closeRegex) {
+        opaque = true;
+        if (closeRegex.test(line)) closeRegex = null;
+      } else {
+        const pair = CODE_BLOCK_PAIRS.find(p => p.open.test(line));
+        if (pair) {
+          opaque = true;
+          closeRegex = pair.close;
+        } else if (ONE_LINE_REGEXES.some(rx => rx.test(line))) {
+          opaque = true; // single-line form: opaque, but doesn't open a persisting block
+        }
+      }
+      const rendered = opaque ? `<span class="hl-code">${escapeHtml(line)}</span>` : renderLine(line);
+      return `<span class="hl-line">${rendered}</span>`;
+    });
     if (!searchTerm) return out.join('\n') + '\n';
     const termRx = escRx(escapeHtml(searchTerm));
     return out.map(line => line.replace(/(<[^>]+>)|([^<]+)/g, (_, tag, chunk) =>

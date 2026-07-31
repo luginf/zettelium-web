@@ -121,6 +121,30 @@ test('numbered list', () => {
   assert.equal(list.items.length, 2);
 });
 
+// "*" est un alias markdown de "-" pour les listes non ordonnées (déviation
+// web-only, demande utilisateur explicite — voir CLAUDE.md).
+test('asterisk is a markdown-style alias for the unordered list marker', () => {
+  const blocks = Txt2TagsParser.parse('* Use the asterisk to prefix list items.\n* Second item.');
+  assert.equal(blocks.length, 1);
+  const list = blocks[0];
+  assert.equal(list.type, 'ListNode');
+  assert.equal(list.ordered, false);
+  assert.equal(list.items.length, 2);
+  assert.deepEqual(list.items[0].inlines, [Text('Use the asterisk to prefix list items.')]);
+});
+
+test('a leading **bold** paragraph is not mistaken for an asterisk list item', () => {
+  const blocks = Txt2TagsParser.parse('**bold** at the start of a line');
+  assert.equal(blocks[0].type, 'Paragraph');
+});
+
+test('asterisk and hyphen markers at the same level merge into one unordered list', () => {
+  const blocks = Txt2TagsParser.parse('- first\n* second');
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].type, 'ListNode');
+  assert.equal(blocks[0].items.length, 2);
+});
+
 test('not a list without exactly one space after the marker', () => {
   const noSpace = Txt2TagsParser.parse('-This is not a list (no space)');
   assert.equal(noSpace[0].type, 'Paragraph');
@@ -212,6 +236,23 @@ test('unterminated verbatim block is closed at EOF', () => {
 test('no space between mark and contents is not a verbatim line', () => {
   const blocks = Txt2TagsParser.parse('```Not a verbatim line, need one space after mark.');
   assert.equal(blocks[0].type, 'Paragraph');
+});
+
+test('verbatim block with a language identifier is not interpreted', () => {
+  const blocks = Txt2TagsParser.parse(
+    ['```kotlin', '// not a comment', '**not bold**'].join('\n'));
+  const code = blocks[0];
+  assert.equal(code.type, 'CodeBlock');
+  assert.equal(code.kind, 'verbatim');
+  assert.deepEqual(code.lines, ['// not a comment', '**not bold**']);
+});
+
+test('a non-nude closing line is treated as code block content, not a real close', () => {
+  const blocks = Txt2TagsParser.parse(
+    ['```kotlin', '```texte', '```'].join('\n'));
+  const code = blocks[0];
+  assert.equal(code.kind, 'verbatim');
+  assert.deepEqual(code.lines, ['```texte']);
 });
 
 // --- Bout en bout ------------------------------------------------------------------
@@ -336,6 +377,21 @@ test('render treats raw/tagged/verbatim code blocks as escaped text (XSS-safety 
   assert.ok(!html.includes('<script>'));
 });
 
+test('render turns a checkbox list item into a checkbox input, stripping the marker from the label', () => {
+  const ast = Txt2TagsParser.parse('- [ ] buy milk\n- [x] done');
+  const indices = Txt2TagsChecklist.assignIndices(ast);
+  const html = Txt2TagsRender.renderAstToHtml(ast, { checklistIndices: indices });
+  assert.ok(html.includes('<li class="t2t-checklist-item"><input type="checkbox" class="t2t-checkbox" data-checkbox-index="0"><span>buy milk</span></li>'));
+  assert.ok(html.includes('<li class="t2t-checklist-item"><input type="checkbox" class="t2t-checkbox" checked data-checkbox-index="1"><span>done</span></li>'));
+});
+
+test('render leaves an ordered list item with bracket-looking text as plain text, not a checkbox', () => {
+  const ast = Txt2TagsParser.parse('+ [ ] not a checkbox');
+  const html = Txt2TagsRender.renderAstToHtml(ast);
+  assert.ok(!html.includes('t2t-checkbox'));
+  assert.ok(html.includes('[ ] not a checkbox'));
+});
+
 // --- Editor syntax highlighting (highlight.js) ------------------------------
 
 test('highlight wraps a heading line in hl-heading with a size class', () => {
@@ -356,6 +412,36 @@ test('highlight wraps inline bold markup in hl-markup within a plain line', () =
 test('highlight escapes HTML-sensitive characters', () => {
   const html = Highlight.highlight('a < b & c > d');
   assert.equal(html, '<span class="hl-line">a &lt; b &amp; c &gt; d</span>\n');
+});
+
+test('highlight does not interpret markup/headings inside a fenced code block (bare or with language), coloring it like a comment', () => {
+  const html = Highlight.highlight(['```kotlin', '== not a heading ==', '**not bold**', '```'].join('\n'));
+  assert.equal(html, [
+    '<span class="hl-line"><span class="hl-code">```kotlin</span></span>',
+    '<span class="hl-line"><span class="hl-code">== not a heading ==</span></span>',
+    '<span class="hl-line"><span class="hl-code">**not bold**</span></span>',
+    '<span class="hl-line"><span class="hl-code">```</span></span>',
+  ].join('\n') + '\n');
+});
+
+test('highlight resumes normal markup after a code block closes', () => {
+  const html = Highlight.highlight(['```', '**opaque**', '```', '**bold again**'].join('\n'));
+  assert.ok(html.includes('<span class="hl-line"><span class="hl-code">**opaque**</span></span>'));
+  assert.ok(html.includes('<span class="hl-markup">**bold again**</span>'));
+});
+
+test('highlight treats a non-nude closing line inside a code block as opaque content, still open', () => {
+  const html = Highlight.highlight(['```kotlin', '```texte', '**still opaque**'].join('\n'));
+  assert.ok(html.includes('<span class="hl-line"><span class="hl-code">```texte</span></span>'));
+  assert.ok(html.includes('<span class="hl-line"><span class="hl-code">**still opaque**</span></span>'));
+});
+
+test('highlight treats a one-line code form as opaque without opening a persisting block', () => {
+  const html = Highlight.highlight(['``` code here', '**bold after**'].join('\n'));
+  assert.equal(html, [
+    '<span class="hl-line"><span class="hl-code">``` code here</span></span>',
+    '<span class="hl-line"><span class="hl-markup">**bold after**</span></span>',
+  ].join('\n') + '\n');
 });
 
 // --- Txt2TagsSummary (plainText/extractTitle) — derived from Txt2TagsSummaryTest.kt ---
@@ -783,4 +869,394 @@ test('toggleHeading preserves an existing label when converting to a different l
 test('toggleHeading clamps an out-of-range level', () => {
   const r = EditorFormatting.toggleHeading('Some Title', 3, 3, 9);
   assert.equal(applyResult('Some Title', r), '===== Some Title =====');
+});
+
+// --- Évaluation d'expressions (math-eval.js) — derived from SExprEvalTest.kt/
+// RpnEvalTest.kt/InfixEvalTest.kt/MathExprEvalTest.kt (zettelium-android) ---
+
+function evalSuccess(evaluator, expr) {
+  const r = evaluator.evaluate(expr);
+  assert.equal(r.ok, true, `expected success, got ${JSON.stringify(r)}`);
+  return r.resultText;
+}
+function evalFailureMessage(evaluator, expr) {
+  const r = evaluator.evaluate(expr);
+  assert.equal(r.ok, false, `expected failure, got ${JSON.stringify(r)}`);
+  return r.message;
+}
+
+test('SExprEval evaluates basic addition like the SciTE reference example', () => {
+  assert.equal(evalSuccess(SExprEval, '(+ 75 1581 1000)'), '2656');
+});
+
+test('SExprEval evaluates nested expressions', () => {
+  assert.equal(evalSuccess(SExprEval, '(+ 2 (* 3 4))'), '14');
+});
+
+test('SExprEval subtraction with a single argument negates it', () => {
+  assert.equal(evalSuccess(SExprEval, '(- 5)'), '-5');
+});
+
+test('SExprEval division with a single argument inverts it', () => {
+  assert.equal(evalSuccess(SExprEval, '(/ 2)'), '0.5');
+});
+
+test('SExprEval subtraction and division fold left to right over multiple arguments', () => {
+  assert.equal(evalSuccess(SExprEval, '(- 10 3 3)'), '4');
+  assert.equal(evalSuccess(SExprEval, '(/ 20 5 2)'), '2');
+});
+
+test('SExprEval mod min max abs sqrt expt floor ceil all work', () => {
+  assert.equal(evalSuccess(SExprEval, '(mod 7 3)'), '1');
+  assert.equal(evalSuccess(SExprEval, '(min 5 2 9)'), '2');
+  assert.equal(evalSuccess(SExprEval, '(max 5 2 9)'), '9');
+  assert.equal(evalSuccess(SExprEval, '(abs -5)'), '5');
+  assert.equal(evalSuccess(SExprEval, '(sqrt 9)'), '3');
+  assert.equal(evalSuccess(SExprEval, '(expt 2 3)'), '8');
+  assert.equal(evalSuccess(SExprEval, '(floor 2.7)'), '2');
+  assert.equal(evalSuccess(SExprEval, '(ceil 2.1)'), '3');
+});
+
+test('SExprEval formats whole-number results without a decimal point', () => {
+  assert.equal(evalSuccess(SExprEval, '(+ 1 2 3)'), '6');
+});
+
+test('SExprEval keeps a fractional result as-is', () => {
+  assert.equal(evalSuccess(SExprEval, '(/ 5 2)'), '2.5');
+});
+
+test('SExprEval trims surrounding whitespace before evaluating', () => {
+  assert.equal(evalSuccess(SExprEval, '  (+ 1 2)  '), '3');
+});
+
+test('SExprEval fails on an empty selection', () => {
+  assert.ok(evalFailureMessage(SExprEval, '').length > 0);
+  assert.ok(evalFailureMessage(SExprEval, '   ').length > 0);
+});
+
+test('SExprEval fails on an unknown function', () => {
+  assert.ok(evalFailureMessage(SExprEval, '(pow 2 3)').includes('pow'));
+});
+
+test('SExprEval fails on a missing closing parenthesis', () => {
+  assert.ok(evalFailureMessage(SExprEval, '(+ 1 2').length > 0);
+});
+
+test('SExprEval fails on an unexpected closing parenthesis', () => {
+  assert.ok(evalFailureMessage(SExprEval, '+ 1 2)').length > 0);
+});
+
+test('SExprEval fails on trailing characters after a complete expression', () => {
+  assert.ok(evalFailureMessage(SExprEval, '(+ 1 2) (+ 3 4)').length > 0);
+});
+
+test('SExprEval fails on a bare number-less symbol', () => {
+  assert.ok(evalFailureMessage(SExprEval, 'foo').length > 0);
+});
+
+test('SExprEval fails on an empty list', () => {
+  assert.ok(evalFailureMessage(SExprEval, '()').length > 0);
+});
+
+test('RpnEval subtracts in push order, like a physical Forth stack', () => {
+  assert.equal(evalSuccess(RpnEval, '34 12 -'), '22');
+});
+
+test('RpnEval chains binary operators without parentheses', () => {
+  assert.equal(evalSuccess(RpnEval, '34 12 - 5 12 - +'), '15');
+});
+
+test('RpnEval divides in push order', () => {
+  assert.equal(evalSuccess(RpnEval, '5 2 /'), '2.5');
+});
+
+test('RpnEval unary functions pop a single operand', () => {
+  assert.equal(evalSuccess(RpnEval, '9 sqrt'), '3');
+  assert.equal(evalSuccess(RpnEval, '-5 abs'), '5');
+});
+
+test('RpnEval formats whole-number results without a decimal point', () => {
+  assert.equal(evalSuccess(RpnEval, '1 2 3 + +'), '6');
+});
+
+test('RpnEval fails on an empty selection', () => {
+  assert.ok(evalFailureMessage(RpnEval, '').length > 0);
+  assert.ok(evalFailureMessage(RpnEval, '   ').length > 0);
+});
+
+test('RpnEval fails when a binary operator is missing an operand', () => {
+  assert.ok(evalFailureMessage(RpnEval, '34 -').length > 0);
+});
+
+test('RpnEval fails when the stack has leftover values', () => {
+  assert.ok(evalFailureMessage(RpnEval, '34 12').length > 0);
+});
+
+test('RpnEval fails on an unknown token', () => {
+  assert.ok(evalFailureMessage(RpnEval, '34 12 pow').includes('pow'));
+});
+
+test('InfixEval evaluates a simple subtraction with the trailing equals sign', () => {
+  assert.equal(evalSuccess(InfixEval, '34-12='), '22');
+});
+
+test('InfixEval respects operator precedence', () => {
+  assert.equal(evalSuccess(InfixEval, '3+4*2='), '11');
+});
+
+test('InfixEval parentheses override precedence', () => {
+  assert.equal(evalSuccess(InfixEval, '(3+4)*2='), '14');
+});
+
+test('InfixEval power is right-associative', () => {
+  assert.equal(evalSuccess(InfixEval, '2^3^2='), '512');
+});
+
+test('InfixEval unary minus works at the start of an expression', () => {
+  assert.equal(evalSuccess(InfixEval, '-5='), '-5');
+  assert.equal(evalSuccess(InfixEval, '-5+4='), '-1');
+});
+
+test('InfixEval tolerates surrounding whitespace', () => {
+  assert.equal(evalSuccess(InfixEval, '  3 + 4 =  '), '7');
+});
+
+test('InfixEval requires a trailing equals sign to disambiguate from RPN', () => {
+  assert.ok(evalFailureMessage(InfixEval, '34-12').length > 0);
+});
+
+test('InfixEval fails on an empty expression before the equals sign', () => {
+  assert.ok(evalFailureMessage(InfixEval, '=').length > 0);
+});
+
+test('InfixEval fails on a missing closing parenthesis', () => {
+  assert.ok(evalFailureMessage(InfixEval, '(3+4=').length > 0);
+});
+
+test('InfixEval fails on trailing characters after a complete expression', () => {
+  assert.ok(evalFailureMessage(InfixEval, '3+4 5=').length > 0);
+});
+
+test('MathExprEval routes a leading-paren selection to the prefix evaluator', () => {
+  assert.equal(evalSuccess(MathExprEval, '(+ 75 1581 1000)'), '2656');
+});
+
+test('MathExprEval routes a trailing-equals selection to the infix evaluator', () => {
+  assert.equal(evalSuccess(MathExprEval, '34-12='), '22');
+});
+
+test('MathExprEval routes anything else to the RPN evaluator', () => {
+  assert.equal(evalSuccess(MathExprEval, '34 12 -'), '22');
+});
+
+test('MathExprEval trailing equals wins even if the expression is also parenthesised', () => {
+  assert.equal(evalSuccess(MathExprEval, '(3+4)*2='), '14');
+});
+
+test('MathExprEval an unrecognized bare word still fails, not silently no-ops', () => {
+  assert.equal(MathExprEval.evaluate('foo').ok, false);
+});
+
+test("MathExprEval.formatResult keeps the historical 'expr = result' form for prefix Lisp expressions", () => {
+  const r = MathExprEval.evaluate('(+ 1 2)');
+  assert.equal(MathExprEval.formatResult('(+ 1 2)', r), '(+ 1 2) = 3');
+});
+
+test('MathExprEval.formatResult appends just the result after the existing equals sign for infix', () => {
+  const r = MathExprEval.evaluate('34-12=');
+  assert.equal(MathExprEval.formatResult('34-12=', r), '34-12= 22');
+});
+
+test('MathExprEval.formatResult puts the RPN result on a new line below, without an equals sign', () => {
+  const r = MathExprEval.evaluate('34 12 -');
+  assert.equal(MathExprEval.formatResult('34 12 -', r), '34 12 -\n22');
+});
+
+// --- Gestion des listes (editor-formatting.js: continueListOnNewline/
+// indentListLines/dedentListLines) — derived from EditorFormattingTest.kt
+// (zettelium-android, round 32/34) ---
+
+test('continueListOnNewline repeats the same unordered marker on a non-empty item', () => {
+  const text = '- first\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '- first\n- ');
+  assert.equal(r.cursorStart, text.length + 2);
+});
+
+test('continueListOnNewline repeats an asterisk marker (markdown alias) and offers checkbox continuation for it too', () => {
+  const text = '* first\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '* first\n* ');
+
+  const checklistText = '* [ ] first\n';
+  const checklistResult = EditorFormatting.continueListOnNewline(checklistText, checklistText.length);
+  assert.equal(applyResult(checklistText, checklistResult), '* [ ] first\n* [ ] ');
+});
+
+test('continueListOnNewline preserves indentation and ordered marker', () => {
+  const text = '  + first\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '  + first\n  + ');
+  assert.equal(r.cursorStart, text.length + 4);
+});
+
+test('continueListOnNewline continues a definition list item', () => {
+  const text = ': term\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), ': term\n: ');
+  assert.equal(r.cursorStart, text.length + 2);
+});
+
+test('continueListOnNewline removes the marker instead of repeating it on an empty item', () => {
+  const text = '- first\n- \n';
+  const cursor = text.length;
+  const r = EditorFormatting.continueListOnNewline(text, cursor);
+  assert.equal(applyResult(text, r), '- first\n');
+  assert.equal(r.cursorStart, '- first\n'.length);
+});
+
+test('continueListOnNewline does nothing when the previous line is not a list item', () => {
+  assert.equal(EditorFormatting.continueListOnNewline('plain paragraph\n', 'plain paragraph\n'.length), null);
+});
+
+test('continueListOnNewline does nothing without a freshly inserted newline right before the cursor', () => {
+  assert.equal(EditorFormatting.continueListOnNewline('- item', 3), null);
+});
+
+test('continueListOnNewline inserts a fresh unchecked checkbox after a checkbox item', () => {
+  const text = '- [ ] first\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '- [ ] first\n- [ ] ');
+  assert.equal(r.cursorStart, text.length + 6);
+});
+
+test('continueListOnNewline inserts a fresh unchecked checkbox even after a checked item', () => {
+  const text = '- [x] done\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '- [x] done\n- [ ] ');
+  assert.equal(r.cursorStart, text.length + 6);
+});
+
+test('continueListOnNewline recognizes the empty-bracket checkbox form too', () => {
+  const text = '- [] first\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '- [] first\n- [ ] ');
+  assert.equal(r.cursorStart, text.length + 6);
+});
+
+test('continueListOnNewline exits the list on a label-less checkbox item', () => {
+  const text = '- [ ] first\n- [ ] \n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '- [ ] first\n');
+  assert.equal(r.cursorStart, '- [ ] first\n'.length);
+});
+
+test("continueListOnNewline does not treat an ordered item's bracket text as a checkbox", () => {
+  const text = '+ [ ] first\n';
+  const r = EditorFormatting.continueListOnNewline(text, text.length);
+  assert.equal(applyResult(text, r), '+ [ ] first\n+ ');
+  assert.equal(r.cursorStart, text.length + 2);
+});
+
+test('indentListLines adds two spaces before list markers only', () => {
+  const text = '- item\nnot a list line';
+  const r = EditorFormatting.indentListLines(text, 0, text.length);
+  assert.equal(applyResult(text, r), '  - item\nnot a list line');
+});
+
+test('indentListLines/dedentListLines also recognize the asterisk marker', () => {
+  const text = '* item';
+  const indented = applyResult(text, EditorFormatting.indentListLines(text, 0, text.length));
+  assert.equal(indented, '  * item');
+  const dedented = applyResult(indented, EditorFormatting.dedentListLines(indented, 0, indented.length));
+  assert.equal(dedented, text);
+});
+
+test('dedentListLines removes up to two leading spaces from list markers only', () => {
+  const text = '    - item\nnot a list line';
+  const r = EditorFormatting.dedentListLines(text, 0, text.length);
+  assert.equal(applyResult(text, r), '  - item\nnot a list line');
+});
+
+test('dedentListLines does not go below zero indentation', () => {
+  const text = '- item';
+  const r = EditorFormatting.dedentListLines(text, 0, text.length);
+  assert.equal(applyResult(text, r), '- item');
+});
+
+test('indentListLines and dedentListLines round-trip on a single list line', () => {
+  const text = '- item';
+  const indented = applyResult(text, EditorFormatting.indentListLines(text, 0, text.length));
+  const roundTripped = applyResult(indented, EditorFormatting.dedentListLines(indented, 0, indented.length));
+  assert.equal(roundTripped, text);
+});
+
+// --- Cases à cocher (txt2tags/checklist.js) — derived from
+// Txt2TagsChecklistTest.kt (zettelium-android, round 32/34) ---
+
+test('parseCheckbox recognizes an unchecked box with a space', () => {
+  assert.deepEqual(Txt2TagsChecklist.parseCheckbox('[ ] buy milk'), { checked: false, label: 'buy milk' });
+});
+
+test('parseCheckbox recognizes the empty-bracket form as unchecked too', () => {
+  assert.deepEqual(Txt2TagsChecklist.parseCheckbox('[] buy milk'), { checked: false, label: 'buy milk' });
+});
+
+test('parseCheckbox recognizes a checked box (lower or upper case x)', () => {
+  assert.deepEqual(Txt2TagsChecklist.parseCheckbox('[x] done'), { checked: true, label: 'done' });
+  assert.deepEqual(Txt2TagsChecklist.parseCheckbox('[X] done'), { checked: true, label: 'done' });
+});
+
+test('parseCheckbox returns an empty label for a marker with nothing after it', () => {
+  assert.deepEqual(Txt2TagsChecklist.parseCheckbox('[ ] '), { checked: false, label: '' });
+  assert.deepEqual(Txt2TagsChecklist.parseCheckbox('[ ]'), { checked: false, label: '' });
+});
+
+test('parseCheckbox returns null for content that is not a checkbox', () => {
+  assert.equal(Txt2TagsChecklist.parseCheckbox('plain text'), null);
+  assert.equal(Txt2TagsChecklist.parseCheckbox('not [ ] at start'), null);
+});
+
+test('toggle flips an unchecked box to checked', () => {
+  assert.equal(Txt2TagsChecklist.toggle('- [ ] task', 0), '- [x] task');
+});
+
+test('toggle also works on an asterisk-marked list item', () => {
+  assert.equal(Txt2TagsChecklist.toggle('* [ ] task', 0), '* [x] task');
+});
+
+test('toggle flips a checked box back to unchecked', () => {
+  assert.equal(Txt2TagsChecklist.toggle('- [x] task', 0), '- [ ] task');
+});
+
+test('toggle finds the Nth checkbox top-to-bottom, nesting included', () => {
+  const source = ['- [ ] first', '  - [ ] nested', '- [x] third'].join('\n');
+  assert.equal(Txt2TagsChecklist.toggle(source, 1), ['- [ ] first', '  - [x] nested', '- [x] third'].join('\n'));
+});
+
+test('toggle returns null for an out-of-range index', () => {
+  assert.equal(Txt2TagsChecklist.toggle('- [ ] only one', 5), null);
+});
+
+test('toggle ignores non-checkbox list items when counting', () => {
+  const source = ['- plain item', '- [ ] checkbox'].join('\n');
+  assert.equal(Txt2TagsChecklist.toggle(source, 0), ['- plain item', '- [x] checkbox'].join('\n'));
+});
+
+test('assignIndices numbers unordered checkbox items top-to-bottom, skipping ordered lists', () => {
+  const blocks = Txt2TagsParser.parse(['- [ ] first', '- [ ] second', '+ [ ] not a checkbox (ordered)'].join('\n'));
+  const list = blocks[0];
+  const indices = Txt2TagsChecklist.assignIndices(blocks);
+  assert.equal(indices.get(list.items[0]), 0);
+  assert.equal(indices.get(list.items[1]), 1);
+  const orderedList = blocks[1];
+  assert.equal(indices.has(orderedList.items[0]), false);
+});
+
+test('assignIndices distinguishes two structurally identical empty checkbox items', () => {
+  const blocks = Txt2TagsParser.parse(['- [ ] ', '- [ ] '].join('\n'));
+  const list = blocks[0];
+  const indices = Txt2TagsChecklist.assignIndices(blocks);
+  assert.equal(indices.get(list.items[0]), 0);
+  assert.equal(indices.get(list.items[1]), 1);
 });

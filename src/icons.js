@@ -117,5 +117,46 @@ const Icons = (() => {
     '<circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/>' +
     '<line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/>', size);
 
-  return { link, save, eye, eyeOff, edit, hash, clock, restore, wrench, tag, sort, gear, toc, trash, folder, search, copy, filePlus, crosshair };
+  // Feather "list" — bascule "Liste" du menu contextuel (round 32 Android).
+  const list = (size = 18) => strokeSvg(
+    '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>' +
+    '<line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>', size);
+
+  // Feather "check-square" — bascule "Case à cocher" du menu contextuel (round 32 Android).
+  const checkSquare = (size = 18) => strokeSvg(
+    '<polyline points="9 11 12 14 22 4"/>' +
+    '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>', size);
+
+  // Feather "star" — favoris (round 28 Android). `filled` bascule entre le
+  // contour (non favori) et le remplissage plein (favori) — même glyphe,
+  // pas deux SVG distincts.
+  const star = (size = 18, filled = false) => filled
+    ? `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="currentColor">` +
+      '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>'
+    : strokeSvg('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/>', size);
+
+  // Feather "globe" — bascule de portée "Tous les dépôts" (round 27a Android).
+  const globe = (size = 18) => strokeSvg(
+    '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>' +
+    '<path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>', size);
+
+  // Feather "droplet" — couleur d'identification par dépôt (round 22 :
+  // pas de glyphe "palette" simple/bien connu dans ce sous-ensemble de
+  // Feather déjà utilisé ici, une goutte de peinture reste un symbole
+  // clair pour "couleur" sans en dessiner un nouveau à la main).
+  const droplet = (size = 18) => strokeSvg(
+    '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>', size);
+
+  // Feather "maximize-2" / "minimize-2" — mode sans distraction (round 24) :
+  // maximize (flèches vers l'extérieur) pour l'activer depuis le menu ⋮,
+  // minimize (flèches vers l'intérieur) pour le bouton flottant qui permet
+  // d'en sortir une fois le bandeau masqué.
+  const maximize = (size = 18) => strokeSvg(
+    '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>' +
+    '<line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>', size);
+  const minimize = (size = 18) => strokeSvg(
+    '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>' +
+    '<line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>', size);
+
+  return { link, save, eye, eyeOff, edit, hash, clock, restore, wrench, tag, sort, gear, toc, trash, folder, search, copy, filePlus, crosshair, list, checkSquare, star, globe, droplet, maximize, minimize };
 })();

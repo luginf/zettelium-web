@@ -13,6 +13,12 @@ const State = {
   dirSubdirs: [],          // [{name, handle, path}] subfolders of the current folder
   repoFiles: [],           // NoteFile[] of the current folder — {path, name, fileHandle, lastModified, size}
 
+  // Favoris par note (round 28 Android) — Set<string> de clés
+  // `${repositoryId}::${path}`, chargée depuis Storage au démarrage (voir
+  // loadState ci-dessous). Globale (tous dépôts confondus), comme côté
+  // Android.
+  favorites: new Set(),
+
   settings: {
     // Comma/space-separated suffixes, same convention and default as
     // zettelium-android's AppSettings.noteExtensions (round 21).
@@ -57,6 +63,15 @@ const State = {
     editorMarginY: 24,
     editorLineSpacing: 1.5,
 
+    // Facteur de grossissement des marges en mode sans distraction (round
+    // 25, demande explicite : "un champ où on indique facteur n
+    // grossissement de la marge") — multiplie `editorMarginX`/`editorMarginY`
+    // UNIQUEMENT pendant que `Editor._distractionFree` est actif (voir
+    // `applyEditorTypography()` dans app.js, seul endroit qui lit ce
+    // réglage) ; les marges normales de l'éditeur restent inchangées en
+    // dehors de ce mode. 1 = pas de grossissement (comportement historique).
+    distractionFreeMarginFactor: 1,
+
     // Sauvegarde automatique (round 10) — porté d'`AppSettings
     // .autosaveEnabled` : désactivée par défaut ("cela sauvegarde
     // régulièrement... n'est pas souhaité", décision explicite Android
@@ -96,7 +111,19 @@ const State = {
     // des bugs de curseur/sélection décalés (rounds 13/20/20bis) : un
     // agrandissement désactivé les élimine à la source plutôt que de
     // continuer à les corriger un par un à chaque nouvelle manifestation.
-    headingSizesEnabled: true
+    headingSizesEnabled: true,
+
+    // CSS de la prévisualisation (#ed-preview), éditable depuis Réglages >
+    // Aperçu (round 25, demande explicite : "expose également le CSS
+    // utilisé pour la prévisualisation et permet de l'éditer à sa guise").
+    // Chaîne vide = pas de personnalisation, on retombe sur
+    // `PreviewStyle.DEFAULT_CSS` (voir app.js `applyPreviewCss()`) — jamais
+    // les deux mélangés (l'un OU l'autre est injecté, pas une fusion).
+    // Volontairement absent de l'export durable `zettelium.ini` (voir
+    // ini.js) : du CSS multi-lignes ne survivrait pas au format `clé =
+    // valeur`, même raisonnement que `favorites`/`cursors`/`colorTag`
+    // (IndexedDB seul).
+    previewCustomCss: ''
   }
 };
 
@@ -187,7 +214,8 @@ async function maybeRestoreDurableConfig(repo) {
     setTocSidebarMode(State.settings.tocSidebarMode),
     setFileListSidebarMode(State.settings.fileListSidebarMode),
     setFileListSidebarWidth(State.settings.fileListSidebarWidth),
-    setHeadingSizesEnabled(State.settings.headingSizesEnabled)
+    setHeadingSizesEnabled(State.settings.headingSizesEnabled),
+    setDistractionFreeMarginFactor(State.settings.distractionFreeMarginFactor)
   ]);
 }
 
@@ -209,7 +237,8 @@ function activeRepository() {
 async function loadState() {
   const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, themeMode,
     language, editorFontFamily, editorFontSize, editorMarginX, editorMarginY, editorLineSpacing, autosaveEnabled,
-    tocSidebarMode, fileListSidebarMode, fileListSidebarWidth, headingSizesEnabled] = await Promise.all([
+    tocSidebarMode, fileListSidebarMode, fileListSidebarWidth, headingSizesEnabled, distractionFreeMarginFactor,
+    previewCustomCss] = await Promise.all([
     Storage.getAllRepositories(),
     Storage.getMeta('noteExtensions'),
     Storage.getMeta('noteExtensionsFilterDisabled'),
@@ -228,9 +257,12 @@ async function loadState() {
     Storage.getMeta('tocSidebarMode'),
     Storage.getMeta('fileListSidebarMode'),
     Storage.getMeta('fileListSidebarWidth'),
-    Storage.getMeta('headingSizesEnabled')
+    Storage.getMeta('headingSizesEnabled'),
+    Storage.getMeta('distractionFreeMarginFactor'),
+    Storage.getMeta('previewCustomCss')
   ]);
   State.repositories = (repos || []).sort((a, b) => a.order - b.order);
+  State.favorites = new Set(await Storage.getAllFavorites());
   if (noteExtensions !== undefined) State.settings.noteExtensions = noteExtensions;
   if (filterDisabled !== undefined) State.settings.noteExtensionsFilterDisabled = filterDisabled;
   // .trim() on load (not just on write) — a leading/trailing space in a
@@ -252,6 +284,8 @@ async function loadState() {
   if (fileListSidebarMode !== undefined) State.settings.fileListSidebarMode = fileListSidebarMode;
   if (fileListSidebarWidth !== undefined) State.settings.fileListSidebarWidth = fileListSidebarWidth;
   if (headingSizesEnabled !== undefined) State.settings.headingSizesEnabled = headingSizesEnabled;
+  if (distractionFreeMarginFactor !== undefined) State.settings.distractionFreeMarginFactor = distractionFreeMarginFactor;
+  if (previewCustomCss !== undefined) State.settings.previewCustomCss = previewCustomCss;
 
   // Re-verify permission on every repository without prompting — a prompt
   // requires a user gesture, done on demand via reauthorizeRepository().
@@ -278,6 +312,37 @@ async function addRepository(dirHandle) {
 
 async function setIncludeExtensionInLinks(repo, value) {
   repo.includeExtensionInLinks = value;
+  await Storage.putRepository(repo);
+}
+
+// Couleur d'identification par dépôt (round 22, port de
+// zettelium-android's RepositoryColorTag.kt) — palette fixe (pas de
+// sélecteur RVB complet), mêmes 8 teintes que la version Android pour une
+// identité visuelle cohérente entre les deux plateformes. `colorTag` (hex
+// ou `null`) déjà présent dans le modèle `Repository` depuis la phase 1
+// (`addRepository`), jamais exposé à l'utilisateur jusqu'ici.
+const REPOSITORY_COLOR_SWATCHES = [
+  '#E57373', '#F0A868', '#DBC257', '#81C784',
+  '#4FC3F7', '#7986CB', '#BA68C8', '#A1887F',
+];
+
+// Noir ou blanc selon la luminance relative (sRGB) de `hex` — reste lisible
+// sur une couleur de dépôt arbitraire (port de RepositoryColorTag.kt's
+// `readableTextColor`, même formule que Compose's `Color.luminance()`).
+function readableTextColor(hex) {
+  const channel = i => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+  return luminance > 0.5 ? '#000000' : '#ffffff';
+}
+
+// Pas de `scheduleDurableExport()` ici — `colorTag`, comme le reste du
+// modèle `Repository`, vit uniquement en IndexedDB (même choix qu'Android :
+// un champ Room, jamais exporté dans `zettelium_state.json`/`zettelium.ini`).
+async function setColorTag(repo, colorTag) {
+  repo.colorTag = colorTag;
   await Storage.putRepository(repo);
 }
 
@@ -480,4 +545,65 @@ async function setHeadingSizesEnabled(value) {
   await Storage.setMeta('headingSizesEnabled', value);
   document.documentElement.classList.toggle('heading-sizes', value);
   scheduleDurableExport();
+}
+
+async function setDistractionFreeMarginFactor(value) {
+  State.settings.distractionFreeMarginFactor = value;
+  await Storage.setMeta('distractionFreeMarginFactor', value);
+  applyEditorTypography(); // no-op visuellement si le mode sans distraction n'est pas actif
+  scheduleDurableExport();
+}
+
+// Pas de scheduleDurableExport() ici — voir le commentaire sur
+// `previewCustomCss` plus haut, volontairement absent de l'export .ini.
+async function setPreviewCustomCss(value) {
+  State.settings.previewCustomCss = value;
+  await Storage.setMeta('previewCustomCss', value);
+  applyPreviewCss();
+}
+
+// --- Favoris (round 28 Android) ---------------------------------------------
+
+function favoriteKey(repositoryId, path) {
+  return `${repositoryId}::${path}`;
+}
+
+function isFavorite(repositoryId, path) {
+  return State.favorites.has(favoriteKey(repositoryId, path));
+}
+
+async function toggleFavorite(repositoryId, path) {
+  const key = favoriteKey(repositoryId, path);
+  if (State.favorites.has(key)) {
+    State.favorites.delete(key);
+    await Storage.deleteFavorite(key);
+  } else {
+    State.favorites.add(key);
+    await Storage.putFavorite(key);
+  }
+}
+
+// L'URI (ici : la clé `repositoryId::path`) change au renommage/déplacement
+// d'une note — même piège que les backlinks Zettelkasten (clés par chemin,
+// pas par identité stable) : sans transfert explicite, un favori
+// "disparaîtrait" silencieusement. Appelé aux points qui changent déjà le
+// chemin d'une note existante (browser.js, editor.js) ; no-op si la note
+// n'était pas favorite. Une note DUPLIQUÉE ne reprend pas le favori de
+// l'originale (décision volontaire, même choix qu'Android) — pas de rekey
+// pour une duplication, seulement pour un vrai renommage/déplacement.
+async function rekeyFavorite(oldRepositoryId, oldPath, newRepositoryId, newPath) {
+  const oldKey = favoriteKey(oldRepositoryId, oldPath);
+  if (!State.favorites.has(oldKey)) return;
+  State.favorites.delete(oldKey);
+  await Storage.deleteFavorite(oldKey);
+  const newKey = favoriteKey(newRepositoryId, newPath);
+  State.favorites.add(newKey);
+  await Storage.putFavorite(newKey);
+}
+
+async function removeFavorite(repositoryId, path) {
+  const key = favoriteKey(repositoryId, path);
+  if (!State.favorites.has(key)) return;
+  State.favorites.delete(key);
+  await Storage.deleteFavorite(key);
 }

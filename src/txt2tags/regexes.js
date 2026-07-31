@@ -13,8 +13,15 @@
 // copies rather than mutating these.
 const Txt2TagsRegexes = (() => {
   // --- Délimiteurs de blocs ---------------------------------------------
-  const blockVerbOpen = /^```\s*$/;
-  const blockVerbClose = blockVerbOpen;
+  // blockVerbOpen accepte un identifiant de langage optionnel collé aux
+  // apostrophes inverses (style Markdown/GitHub, ex. ```kotlin) — round 36
+  // zettelium-android. blockVerbClose reste STRICT (nu uniquement) :
+  // accepter un langage en fermeture n'aurait aucun sens et laisserait
+  // passer une ligne de clôture avec du texte parasite comme une vraie
+  // fermeture — contrairement à blockRaw*/blockTagged*, qui n'ont pas cette
+  // convention de langage dans l'écosystème Markdown et restent des alias.
+  const blockVerbOpen = /^```(\S*)\s*$/;
+  const blockVerbClose = /^```\s*$/;
   const blockRawOpen = /^"""\s*$/;
   const blockRawClose = blockRawOpen;
   const blockTaggedOpen = /^'''\s*$/;
@@ -39,10 +46,15 @@ const Txt2TagsRegexes = (() => {
   const fontStrike = /--([^\s](?:.*?[^\s])?-*)--/;
 
   // --- Listes -------------------------------------------------------------
-  const list = /^( *)(-) (?=[^ ])/;
+  // `*` est un alias markdown de `-` pour les listes non ordonnées (demande
+  // utilisateur explicite, déviation web-only par rapport à zettelium-android
+  // — voir CLAUDE.md "Décisions structurantes"). Ne matche jamais `**gras**`
+  // en tête de ligne : ce dernier n'a pas d'espace entre les deux `*`, alors
+  // que le marqueur de liste exige exactement UN `*`/`-` suivi d'un espace.
+  const list = /^( *)([-*]) (?=[^ ])/;
   const numlist = /^( *)(\+) (?=[^ ])/;
   const deflist = /^( *)(:) (.*)$/;
-  const listClose = /^( *)([-+:])\s*$/;
+  const listClose = /^( *)([-*+:])\s*$/;
 
   // --- Divers blocs --------------------------------------------------------
   const bar = /^(\s*)([_=-]{20,})\s*$/;

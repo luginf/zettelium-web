@@ -20,9 +20,38 @@ const Editor = (() => {
   let _zkId = null;    // this note's own Zettelkasten ID, if any (from the index or freshly detected)
   let _dirty = false;
   let _previewMode = false;
+  // Mode sans distraction (round 24) — variable de session pure, comme
+  // `_previewMode`/`_tocPinned` (retiré au round 12) : jamais persistée,
+  // retombe à false à chaque fermeture de note (voir close()).
+  let _distractionFree = false;
   let _baselineMtime = null; // mtime last seen/written on disk — see checkExternalChange()
   let _checkingExternal = false; // reentrancy guard (focus + save can race)
   let _autosaveTimer = null; // pending debounced autosave, if any — see scheduleAutosave()
+
+  // Point de départ d'un glisser-sélection réel (mousedown -> mousemove ->
+  // mouseup), round 27 — voir le listener 'mousedown'/'mousemove' plus bas
+  // et le commentaire de `correctedOffsetAt` : round 20bis n'avait corrigé
+  // que le clic simple, laissant explicitement le glisser à la résolution
+  // native (même cause racine, jamais traitée pour ce cas précis).
+  //
+  // Round 29 (retour utilisateur : décalage croissant avec un texte long) —
+  // `_dragAnchorOffset` (pas `_dragAnchorClientX/Y`) : un OFFSET DE TEXTE
+  // résolu immédiatement au `mousedown`, pas des coordonnées écran
+  // mémorisées pour être réinterprétées plus tard au `mouseup`. Nécessaire
+  // parce qu'un glisser assez long pour approcher le bord de la zone
+  // visible déclenche l'auto-scroll natif du textarea PENDANT le glisser —
+  // si on avait stocké de simples coordonnées client (comme avant ce
+  // round), les réinterpréter à la fin (après que le contenu a défilé
+  // sous ce point fixe de l'écran) désignerait un tout autre texte que
+  // celui qui s'y trouvait au moment du clic. Résoudre l'ancre tout de
+  // suite (avant tout défilement) élimine le problème à la racine ; seul le
+  // point de RELÂCHEMENT (`mouseup`) a besoin d'être résolu "en direct",
+  // puisqu'il reflète déjà l'état actuel (post-défilement) du contenu.
+  let _dragAnchorOffset = null;
+  let _didDragSelect = false;
+  // Throttle de l'aperçu visuel du glisser (round 31) — voir le listener
+  // 'mousemove' plus bas.
+  let _lastDragPreviewTime = 0;
 
   // Recherche dans le texte en cours d'édition (Ctrl+F / menu ⋮) — voir la
   // section "Find in note" plus bas.
@@ -300,6 +329,26 @@ const Editor = (() => {
     return total;
   }
 
+  // Inverse de `lineElementForOffset` : offset GLOBAL de texte brut du
+  // DÉBUT d'un `<span class="hl-line">` donné (round 30) — compte les '\n'
+  // de `ta().value` jusqu'à atteindre l'index de cette ligne parmi ses
+  // sœurs, même logique de comptage que `lineElementForOffset` mais dans
+  // l'autre sens (élément -> offset plutôt qu'offset -> élément).
+  function globalOffsetOfLineStart(lineSpan) {
+    const lines = pre().querySelectorAll(':scope > span.hl-line');
+    let lineIndex = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i] === lineSpan) { lineIndex = i; break; }
+    }
+    if (lineIndex < 0) return null;
+    const text = ta().value;
+    let offset = 0, currentLine = 0;
+    for (let i = 0; i < text.length && currentLine < lineIndex; i++) {
+      if (text[i] === '\n') { currentLine++; offset = i + 1; }
+    }
+    return currentLine === lineIndex ? offset : text.length;
+  }
+
   // Un clic natif sur le vrai textarea résout sa position selon SES PROPRES
   // métriques UNIFORMES (une seule taille de police pour toutes les lignes)
   // — alors que l'overlay, lui, agrandit les lignes de titre
@@ -318,6 +367,26 @@ const Editor = (() => {
   // restaurée aussitôt (synchrone, aucun effet visible) — vérifié par
   // mesure directe que `caretRangeFromPoint` retrouve alors bien le texte
   // réel du pre plutôt qu'une position vide dans `#ed-wrap`.
+  //
+  // Round 30 (retour utilisateur : sélection encore décalée sur un texte
+  // long, "toujours décalé du même espace qu'auparavant" malgré le round
+  // 29) — root-causé par une reproduction CDP (mousedown/mousemove/mouseup
+  // réels + auto-scroll natif du navigateur pendant un glisser maintenu
+  // près du bord, comparé à un calcul de référence indépendant) : ce
+  // n'était PAS un problème d'auto-scroll/timing (round 29 avait bien
+  // corrigé ce point-là) mais un cas que `caretRangeFromPoint` renvoie
+  // TRÈS souvent — pas un cas rare — un point tombant sur une LIGNE VIDE
+  // (fréquentes entre deux paragraphes, voir capture d'écran de
+  // l'utilisateur) renvoie un `Range` dont `startContainer` est le `<span
+  // class="hl-line">` lui-même (pas de nœud texte à l'intérieur, rien à
+  // sélectionner) — l'ancien garde-fou `startContainer.nodeType !==
+  // Node.TEXT_NODE` rejetait ce cas en renvoyant `null`, laissant tomber la
+  // correction ENTIÈREMENT et retombant sur la résolution native buguée en
+  // silence. Un glisser assez long pour déclencher l'auto-scroll traverse
+  // presque toujours au moins une ligne vide (paragraphes séparés par des
+  // lignes blanches), ce qui explique le côté systématique du décalage.
+  // Traité maintenant comme un cas normal (pas une erreur) : la seule
+  // position possible sur une ligne vide est son propre début.
   function correctedOffsetAt(clientX, clientY) {
     if (!document.caretRangeFromPoint) return null;
     const input = ta();
@@ -331,8 +400,13 @@ const Editor = (() => {
       input.style.pointerEvents = '';
       overlay.style.pointerEvents = '';
     }
-    if (!range || range.startContainer.nodeType !== Node.TEXT_NODE || !overlay.contains(range.startContainer)) return null;
-    return offsetForDomPosition(range.startContainer, range.startOffset);
+    if (!range || !overlay.contains(range.startContainer)) return null;
+    if (range.startContainer.nodeType === Node.TEXT_NODE) {
+      return offsetForDomPosition(range.startContainer, range.startOffset);
+    }
+    const lineSpan = range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer.closest('span.hl-line') : null;
+    return lineSpan ? globalOffsetOfLineStart(lineSpan) : null;
   }
 
   // Peint la sélection comme un `Highlight` (CSS Custom Highlight API) sur
@@ -341,10 +415,20 @@ const Editor = (() => {
   // style.css pour le pourquoi (alignement + contraste du texte
   // sélectionné). Sur un navigateur sans l'API, ne fait rien : le repli CSS
   // (fond de sélection natif translucide) prend le relais tout seul.
-  function updateSelectionHighlight() {
+  //
+  // `overrideStart`/`overrideEnd` (round 31) : par défaut, lit la vraie
+  // sélection native (`ta().selectionStart/End`) — mais pendant un glisser
+  // (voir le listener 'mousemove'), le natif reste temporairement décalé
+  // jusqu'au `mouseup` (round 20bis n'a jamais eu vocation à corriger la
+  // sélection native ELLE-MÊME, seulement ce qui est affiché) ; passer un
+  // intervalle explicite permet de peindre un APERÇU corrigé sans toucher
+  // à `ta().selectionStart/End`, laissée à son propre suivi natif jusqu'à
+  // ce que le `mouseup` la remplace pour de bon.
+  function updateSelectionHighlight(overrideStart, overrideEnd) {
     if (!window.CSS || !CSS.highlights) return;
     const input = ta();
-    const { selectionStart: start, selectionEnd: end } = input;
+    const start = overrideStart !== undefined ? overrideStart : input.selectionStart;
+    const end = overrideEnd !== undefined ? overrideEnd : input.selectionEnd;
     if (start === end) { CSS.highlights.delete('ed-selection'); return; }
     const from = domPositionForOffset(start);
     const to = domPositionForOffset(end);
@@ -452,6 +536,26 @@ const Editor = (() => {
     rehighlight();
     markDirty();
     scheduleAutosave();
+  }
+
+  // Continuation automatique du marqueur de liste à l'Entrée (round 32
+  // Android) — `inputType === 'insertLineBreak'` est l'équivalent web du
+  // `TextWatcher.onTextChanged`'s `before == 0 && count == 1` : ne se
+  // déclenche que pour une frappe Entrée ISOLÉE dans le textarea, jamais un
+  // collage multi-lignes (`insertFromPaste`) ni une insertion programmatique
+  // (`insertText`, dont celle-ci elle-même via `applyFormattingResult` juste
+  // en dessous — la réentrance qui en résulte retombe sur ce même chemin
+  // `onInput`, mais `inputType` n'est alors plus 'insertLineBreak', donc pas
+  // de boucle).
+  function onEditorInput(e) {
+    onInput();
+    if (e && e.inputType === 'insertLineBreak') handleListContinuation();
+  }
+
+  function handleListContinuation() {
+    const input = ta();
+    const result = EditorFormatting.continueListOnNewline(input.value, input.selectionStart);
+    if (result) applyFormattingResult(result);
   }
 
   // Directly assigning `input.value` (as this used to do) clears the
@@ -632,8 +736,9 @@ const Editor = (() => {
   }
 
   async function requestClose() {
-    if (!(await requestLeave())) return;
+    if (!(await requestLeave())) return false;
     await close();
+    return true;
   }
 
   // Ouvre une autre note en remplaçant celle affichée, avec le garde-fou
@@ -661,6 +766,8 @@ const Editor = (() => {
     _baselineMtime = null;
     if (window.CSS && CSS.highlights) CSS.highlights.delete('ed-selection');
     hideTocSidebar();
+    _distractionFree = false;
+    applyDistractionFree();
     // Liste de fichiers épinglée (round 19) : le panneau reste étroit et
     // `editor-screen` reste visible — seul son CONTENU bascule vers
     // l'état vide, contrairement au mode normal qui referme l'écran entier
@@ -677,13 +784,22 @@ const Editor = (() => {
     Browser.rescan();
   }
 
+  // Recalcule et réécrit l'aperçu depuis le texte courant du textarea —
+  // factorisé pour être rappelé après une bascule de case à cocher
+  // (`toggleChecklistItem`) sans repasser par `togglePreview` (qui bascule
+  // aussi le mode édition/aperçu, non souhaité ici).
+  function renderPreview() {
+    const ast = Txt2TagsParser.parse(ta().value);
+    const resolveZkLink = _repo ? (zkId => Index.findByZkId(_repo.id, zkId)) : undefined;
+    const checklistIndices = Txt2TagsChecklist.assignIndices(ast);
+    el('ed-preview').innerHTML = Txt2TagsRender.renderAstToHtml(ast, { resolveZkLink, checklistIndices });
+  }
+
   function togglePreview() {
     _previewMode = !_previewMode;
     if (_previewMode) {
       if (!el('ed-search-bar').hidden) searchClose(); // opère sur #ed-input, caché en aperçu
-      const ast = Txt2TagsParser.parse(ta().value);
-      const resolveZkLink = _repo ? (zkId => Index.findByZkId(_repo.id, zkId)) : undefined;
-      el('ed-preview').innerHTML = Txt2TagsRender.renderAstToHtml(ast, { resolveZkLink });
+      renderPreview();
       el('ed-wrap').hidden = true;
       el('ed-preview').hidden = false;
       el('editor-preview-btn').innerHTML = Icons.eyeOff();
@@ -698,6 +814,33 @@ const Editor = (() => {
     updateEditorMenuVisibility();
   }
 
+  // Mode sans distraction (round 24, demande explicite) — masque uniquement
+  // #ed-header (le bandeau : titre, TOC, backlinks, aperçu, enregistrer,
+  // menu ⋮), laisse le reste (recherche en note, panneau TOC latéral)
+  // inchangé — ce sont des outils explicitement invoqués par l'utilisateur,
+  // pas du chrome permanent au sens de la demande. Une fois le bandeau
+  // masqué, le bouton "⋮" qui héberge cette même action disparaît avec lui
+  // — deux façons d'en sortir : le bouton flottant #ed-distraction-exit-btn
+  // (toujours visible, discret) et Échap (voir le listener keydown global).
+  function applyDistractionFree() {
+    el('editor-note-view').classList.toggle('distraction-free', _distractionFree);
+    el('ed-distraction-exit-btn').hidden = !_distractionFree;
+    // Recalcule --ed-margin-x/y : `applyEditorTypography()` (app.js) lit
+    // `_distractionFree` via `isDistractionFree()` pour appliquer (ou
+    // retirer) le facteur de grossissement round 25 — point d'entrée
+    // unique, pas de logique de marge dupliquée ici.
+    applyEditorTypography();
+  }
+
+  function isDistractionFree() {
+    return _distractionFree;
+  }
+
+  function toggleDistractionFree() {
+    _distractionFree = !_distractionFree;
+    applyDistractionFree();
+  }
+
   // Clic sur un ZkLink résolu (<a data-zk-path>) dans l'aperçu — délégation
   // d'événement sur #ed-preview, posée une seule fois à l'init (le contenu
   // de #ed-preview est réécrit à chaque bascule aperçu/édition).
@@ -708,6 +851,23 @@ const Editor = (() => {
     const entry = Index.findByPath(_repo.id, link.dataset.zkPath);
     if (!entry) return;
     openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified });
+  }
+
+  // Bascule d'une case à cocher tapée dans l'aperçu (round 32 Android) —
+  // traitée comme une frappe normale (`replaceAllContent`, undo-safe) : le
+  // texte SOURCE est la vérité, le glyphe visuel natif de <input
+  // type="checkbox"> est de toute façon écrasé par le prochain
+  // `renderPreview()` juste après. `change` (pas `click`) : fire une seule
+  // fois par bascule utilisateur, après la mise à jour de `checked`.
+  function onPreviewChange(e) {
+    const cb = e.target.closest('input.t2t-checkbox[data-checkbox-index]');
+    if (!cb) return;
+    const idx = parseInt(cb.dataset.checkboxIndex, 10);
+    if (Number.isNaN(idx)) return;
+    const newContent = Txt2TagsChecklist.toggle(ta().value, idx);
+    if (newContent === null) return;
+    replaceAllContent(newContent);
+    renderPreview();
   }
 
   // --- Menu contextuel (clic droit) de formatage --------------------------
@@ -726,6 +886,11 @@ const Editor = (() => {
     const input = ta();
     _ctxLink = ZettelkastenLinks.linkAt(input.value, input.selectionStart, input.selectionEnd);
     el('ed-ctx-follow-link').hidden = !_ctxLink;
+    // "Évaluer" — visible seulement si la sélection courante n'est pas vide
+    // (round 30 Android : évaluer une sélection vide n'a pas de sens,
+    // contrairement aux autres actions de ce menu qui basculent la ligne ou
+    // insèrent au curseur sans sélection).
+    el('ed-ctx-eval').hidden = input.selectionStart === input.selectionEnd;
 
     const menu = el('ed-context-menu');
     menu.style.left = '0px';
@@ -783,8 +948,60 @@ const Editor = (() => {
     applyFormattingResult(EditorFormatting.toggleLinePrefix(input.value, input.selectionStart, input.selectionEnd, '% '));
   }
 
+  // "Liste"/"Case à cocher" (round 32 Android) — réutilisent tels quels
+  // toggleLinePrefix (déjà utilisé pour "Commentaire"), aucune nouvelle
+  // fonction de formatage nécessaire.
+  function formatList() {
+    const input = ta();
+    applyFormattingResult(EditorFormatting.toggleLinePrefix(input.value, input.selectionStart, input.selectionEnd, '- '));
+  }
+
+  function formatChecklist() {
+    const input = ta();
+    applyFormattingResult(EditorFormatting.toggleLinePrefix(input.value, input.selectionStart, input.selectionEnd, '- [ ] '));
+  }
+
+  function formatIndentList() {
+    const input = ta();
+    applyFormattingResult(EditorFormatting.indentListLines(input.value, input.selectionStart, input.selectionEnd));
+  }
+
+  function formatDedentList() {
+    const input = ta();
+    applyFormattingResult(EditorFormatting.dedentListLines(input.value, input.selectionStart, input.selectionEnd));
+  }
+
   function insertDate() {
     insertAtCursor(new Date().toISOString().slice(0, 10));
+  }
+
+  // "Évaluer" (round 30/31/33 Android) : remplace la sélection par
+  // "<expression> <résultat>" (mise en forme différenciée par notation, voir
+  // MathExprEval.formatResult) via execCommand('insertText', ...) — même
+  // technique que les autres actions de ce menu (préserve l'historique
+  // annuler/rétablir natif). Échec : alerte avec le message d'erreur, le
+  // texte de l'éditeur reste inchangé (pas de modification silencieuse ou
+  // partielle).
+  function evalSelection() {
+    const input = ta();
+    const start = input.selectionStart, end = input.selectionEnd;
+    if (start === end) return;
+    const expression = input.value.slice(start, end);
+    const result = MathExprEval.evaluate(expression);
+    if (!result.ok) {
+      alert(I18n.t('editor.ctxEvalFailed', { error: result.message }));
+      return;
+    }
+    const replacement = MathExprEval.formatResult(expression, result);
+    input.focus();
+    input.setSelectionRange(start, end);
+    const usedNativeInsert = !!(document.execCommand && document.execCommand('insertText', false, replacement));
+    if (!usedNativeInsert) {
+      const value = input.value;
+      input.value = value.slice(0, start) + replacement + value.slice(end);
+      onInput();
+    }
+    input.setSelectionRange(start + replacement.length, start + replacement.length);
   }
 
   // Même garde-fou "enregistrer avant de quitter" que le clic sur un ZkLink
@@ -1036,13 +1253,31 @@ const Editor = (() => {
   // sélection) : `rect.top - wrapRect.top` donne la position ACTUELLEMENT
   // affichée (dépend du défilement en cours), on y rajoute `ta().scrollTop`
   // pour revenir à la position absolue indépendante du défilement.
+  //
+  // Round 28 (retour utilisateur : TOC toujours décalée, parfois besoin de
+  // scroller pour voir le curseur) : cette fonction construisait encore un
+  // `Range` collé directement via `domPositionForOffset` + `.collapse(true)`
+  // — exactement la technique dont le round 20ter avait pourtant démontré
+  // qu'elle renvoie un rect systématiquement VIDE (`getClientRects()`
+  // longueur 0 ET `getBoundingClientRect()` tout à zéro dans Chromium) à
+  // certaines positions de frontière, en particulier en tout DÉBUT de ligne
+  // — exactement la position d'une entrée de TOC (`entry.charOffset` pointe
+  // le premier caractère du titre). Un rect à zéro donnait alors
+  // `ta().scrollTop + (0 - wrapRect.top)`, une valeur sans rapport avec la
+  // cible réelle (souvent négative, ramenée à 0 par le `Math.max` de
+  // l'appelant — d'où le défilement vers le HAUT du document au lieu du
+  // titre visé). Le round 20ter n'avait corrigé que `updateCaretIndicator`
+  // (nouvelle fonction `lineRangeForOffset`), jamais cette fonction-ci,
+  // pourtant touchée par exactement le même piège. Remplacé par
+  // `lineRangeForOffset` (même technique, déjà robuste à cette position) —
+  // le curseur RESTAIT correctement placé même avant ce correctif (`entry
+  // .charOffset` passé tel quel à `setSelectionRange`, jamais concerné),
+  // seul le calcul du DÉFILEMENT vers lui était faux.
   function pixelTopForOffset(offset) {
-    const pos = domPositionForOffset(offset);
-    if (!pos) return 0;
-    const range = new Range();
-    range.setStart(pos.node, pos.offset);
-    range.collapse(true);
+    const range = lineRangeForOffset(offset);
+    if (!range) return 0;
     const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) return 0;
     const wrapRect = el('ed-wrap').getBoundingClientRect();
     return ta().scrollTop + (rect.top - wrapRect.top);
   }
@@ -1178,6 +1413,7 @@ const Editor = (() => {
     const slash = _file.path.lastIndexOf('/');
     const folderPrefix = slash >= 0 ? _file.path.slice(0, slash + 1) : '';
     const newFile = { path: folderPrefix + newName, name: newName, fileHandle: newHandle, lastModified: Date.now() };
+    await rekeyFavorite(_repo.id, _file.path, _repo.id, newFile.path);
 
     try {
       await Index.indexRepository(_repo, { forceFull: true });
@@ -1234,6 +1470,7 @@ const Editor = (() => {
   // `data-i18n` générique (statique) ; rappelés à l'init et sur
   // l'évènement `i18n:apply` (changement de langue en direct, voir i18n.js).
   function refreshI18nLabels() {
+    el('editor-menu-distraction-free').innerHTML = `${Icons.maximize()} ${I18n.t('editor.distractionFree')}`;
     el('editor-menu-search').innerHTML = `${Icons.search()} ${I18n.t('editor.search')}`;
     el('editor-menu-insert-id').innerHTML = `${Icons.hash()} ${I18n.t('editor.insertId')}`;
     el('editor-menu-insert-link').innerHTML = `${Icons.link()} ${I18n.t('editor.insertLink')}`;
@@ -1252,7 +1489,12 @@ const Editor = (() => {
     el('ed-ctx-underline').innerHTML = `<span class="ctx-glyph" style="text-decoration:underline">U</span> ${I18n.t('editor.ctxUnderline')}`;
     el('ed-ctx-strike').innerHTML = `<span class="ctx-glyph" style="text-decoration:line-through">S</span> ${I18n.t('editor.ctxStrike')}`;
     el('ed-ctx-comment').innerHTML = `<span class="ctx-glyph">%</span> ${I18n.t('editor.ctxComment')}`;
+    el('ed-ctx-list').innerHTML = `${Icons.list()} ${I18n.t('editor.ctxList')}`;
+    el('ed-ctx-checkbox').innerHTML = `${Icons.checkSquare()} ${I18n.t('editor.ctxCheckbox')}`;
+    el('ed-ctx-indent').innerHTML = `<span class="ctx-glyph">→</span> ${I18n.t('editor.ctxIndent')}`;
+    el('ed-ctx-dedent').innerHTML = `<span class="ctx-glyph">←</span> ${I18n.t('editor.ctxDedent')}`;
     el('ed-ctx-date').innerHTML = `${Icons.clock()} ${I18n.t('editor.ctxDate')}`;
+    el('ed-ctx-eval').innerHTML = `<span class="ctx-glyph">=</span> ${I18n.t('editor.ctxEval')}`;
     // Le titre de la bascule aperçu/édition dépend du mode courant, pas
     // seulement de la langue — resynchronisé depuis l'état actuel.
     el('editor-preview-btn').title = _previewMode ? I18n.t('editor.editTooltip') : I18n.t('editor.previewTooltip');
@@ -1263,6 +1505,7 @@ const Editor = (() => {
     el('editor-backlinks-icon').innerHTML = Icons.link();
     el('editor-preview-btn').innerHTML = Icons.eye();
     el('editor-save-btn').innerHTML = Icons.save();
+    el('ed-distraction-exit-btn').innerHTML = Icons.minimize();
     refreshI18nLabels();
     document.addEventListener('i18n:apply', refreshI18nLabels);
 
@@ -1272,8 +1515,10 @@ const Editor = (() => {
     el('editor-backlinks-btn').addEventListener('click', openBacklinks);
     el('editor-toc-btn').addEventListener('click', openToc);
     el('toc-panel-close-btn').addEventListener('click', hideTocSidebar);
+    el('ed-distraction-exit-btn').addEventListener('click', toggleDistractionFree);
 
     el('editor-menu-btn').addEventListener('click', toggleEditorMenu);
+    el('editor-menu-distraction-free').addEventListener('click', runMenuAction(toggleDistractionFree));
     el('editor-menu-search').addEventListener('click', runMenuAction(searchOpen));
     el('editor-menu-insert-id').addEventListener('click', runMenuAction(insertId));
     el('editor-menu-insert-link').addEventListener('click', runMenuAction(openLinkPicker));
@@ -1295,9 +1540,12 @@ const Editor = (() => {
       // listener ci-dessous a déjà refermé la barre avant que cet écouteur
       // (posé sur document, donc après en ordre de bulle) ne s'exécute.
       else if (e.key === 'Escape' && !el('ed-search-bar').hidden) searchClose();
+      // Seul autre moyen de sortir du mode sans distraction que le bouton
+      // flottant, une fois le bandeau (et son bouton "⋮") masqué.
+      else if (e.key === 'Escape' && _distractionFree) toggleDistractionFree();
     });
 
-    ta().addEventListener('input', onInput);
+    ta().addEventListener('input', onEditorInput);
     ta().addEventListener('scroll', syncScroll);
     ta().addEventListener('keydown', e => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -1324,25 +1572,97 @@ const Editor = (() => {
     // textarea a le focus pour ne pas répondre aux sélections ailleurs dans
     // l'appli (ex. un champ de recherche).
     document.addEventListener('selectionchange', () => {
-      if (document.activeElement === ta()) { updateSelectionHighlight(); updateCaretIndicator(); }
+      if (document.activeElement !== ta()) return;
+      // Round 31 : pendant un glisser actif, l'aperçu corrigé est déjà
+      // repeint par le listener 'mousemove' (`updateSelectionHighlight(lo,
+      // hi)`) — ce listener-ci réagit au suivi NATIF (non corrigé) de la
+      // sélection en cours ; le laisser repeindre aussi ferait clignoter
+      // entre l'aperçu corrigé et la valeur native décalée entre deux
+      // `mousemove`.
+      if (!(_dragAnchorOffset !== null && _didDragSelect)) updateSelectionHighlight();
+      updateCaretIndicator();
     });
     ta().addEventListener('blur', () => {
       if (window.CSS && CSS.highlights) CSS.highlights.delete('ed-selection');
       el('ed-caret').hidden = true;
     });
     el('ed-preview').addEventListener('click', onPreviewClick);
+    el('ed-preview').addEventListener('change', onPreviewChange);
 
-    // Corrige la position du curseur après un simple clic (pas un
-    // glisser/mot/ligne — `selectionStart !== selectionEnd` dans ces cas,
-    // laissés à la résolution native) — voir `correctedOffsetAt`.
+    // Résout et mémorise l'ANCRE du glisser en offset de texte DÈS le
+    // mousedown (round 29 — voir le commentaire de `_dragAnchorOffset` plus
+    // haut : pas de coordonnées écran gardées pour plus tard, un glisser
+    // assez long pour déclencher l'auto-scroll natif du textarea les
+    // rendrait fausses au moment du mouseup). `_didDragSelect` distingue le
+    // glisser d'un simple clic/double-clic/triple-clic (qui ne bougent pas
+    // la souris entre down et up) : ces derniers restent volontairement
+    // laissés à la résolution native (sélection par mot/ligne entière,
+    // round 20bis) pour ne pas casser leur alignement sur les frontières de
+    // mot.
+    ta().addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      _dragAnchorOffset = correctedOffsetAt(e.clientX, e.clientY);
+      _didDragSelect = false;
+      _lastDragPreviewTime = 0;
+    });
+    // Round 31 (retour utilisateur : "la sélection finale est correcte,
+    // mais pendant qu'on sélectionne c'est toujours décalé — juste
+    // visuel") : round 27-30 ne corrigeaient la sélection RÉELLE
+    // (`ta().selectionStart/End`) qu'au relâchement — pendant le glisser
+    // lui-même, la sélection native (non corrigée) continue son propre
+    // suivi, et c'est CE surlignage décalé que l'utilisateur voyait
+    // pendant le geste, avant qu'il ne "saute" à la bonne position au
+    // relâchement. Repeint maintenant un APERÇU corrigé à chaque
+    // déplacement, via `updateSelectionHighlight(lo, hi)` — SANS toucher à
+    // `ta().selectionStart/End` elle-même (laissée à son suivi natif
+    // jusqu'au `mouseup`, qui la remplace pour de bon comme avant) : lui
+    // écrire directement ici risquerait d'interférer avec le suivi natif
+    // du glisser en cours (ancre interne du navigateur, distincte de la
+    // nôtre). Throttlé (~60fps, `performance.now()`) — `correctedOffsetAt`
+    // fait un hit-test DOM complet, coûteux à répéter à chaque `mousemove`
+    // (peut être très fréquent pendant un glisser).
+    ta().addEventListener('mousemove', e => {
+      if (_dragAnchorOffset === null || !(e.buttons & 1)) return;
+      _didDragSelect = true;
+      const now = performance.now();
+      if (now - _lastDragPreviewTime < 16) return;
+      _lastDragPreviewTime = now;
+      const focusOffset = correctedOffsetAt(e.clientX, e.clientY);
+      if (focusOffset === null) return;
+      updateSelectionHighlight(Math.min(_dragAnchorOffset, focusOffset), Math.max(_dragAnchorOffset, focusOffset));
+    });
+
+    // Corrige la position du curseur après un simple clic ET après un
+    // glisser-sélection réel — round 20bis n'avait corrigé que le premier
+    // cas, laissant explicitement le second à la résolution native (voir
+    // `correctedOffsetAt`) : un glisser sur une note à plusieurs titres
+    // atterrit alors sur du texte plus bas que ce qui a été visuellement
+    // sélectionné, la MÊME cause racine (métriques uniformes du textarea vs.
+    // titres agrandis de l'overlay) que le clic simple, jamais traitée pour
+    // ce cas précis avant le round 27 (round 29 en corrige la variante à
+    // longue distance, voir `_dragAnchorOffset`). Seul le point de
+    // RELÂCHEMENT (`e.clientX/Y`) est résolu ICI, en direct — il reflète
+    // déjà l'état actuel (post-défilement éventuel) du contenu.
     ta().addEventListener('mouseup', e => {
       if (e.button !== 0) return;
-      if (ta().selectionStart !== ta().selectionEnd) return;
-      const corrected = correctedOffsetAt(e.clientX, e.clientY);
-      if (corrected !== null && corrected !== ta().selectionStart) {
-        ta().setSelectionRange(corrected, corrected);
-        updateCaretIndicator();
+      if (ta().selectionStart === ta().selectionEnd) {
+        const corrected = correctedOffsetAt(e.clientX, e.clientY);
+        if (corrected !== null && corrected !== ta().selectionStart) {
+          ta().setSelectionRange(corrected, corrected);
+          updateCaretIndicator();
+        }
+      } else if (_didDragSelect && _dragAnchorOffset !== null) {
+        const focusOffset = correctedOffsetAt(e.clientX, e.clientY);
+        if (focusOffset !== null) {
+          const lo = Math.min(_dragAnchorOffset, focusOffset);
+          const hi = Math.max(_dragAnchorOffset, focusOffset);
+          ta().setSelectionRange(lo, hi, _dragAnchorOffset <= focusOffset ? 'forward' : 'backward');
+          updateSelectionHighlight();
+          updateCaretIndicator();
+        }
       }
+      _dragAnchorOffset = null;
+      _didDragSelect = false;
     });
 
     ta().addEventListener('contextmenu', e => {
@@ -1358,7 +1678,12 @@ const Editor = (() => {
     el('ed-ctx-underline').addEventListener('click', runContextMenuAction(() => formatWrap('__')));
     el('ed-ctx-strike').addEventListener('click', runContextMenuAction(() => formatWrap('--')));
     el('ed-ctx-comment').addEventListener('click', runContextMenuAction(formatComment));
+    el('ed-ctx-list').addEventListener('click', runContextMenuAction(formatList));
+    el('ed-ctx-checkbox').addEventListener('click', runContextMenuAction(formatChecklist));
+    el('ed-ctx-indent').addEventListener('click', runContextMenuAction(formatIndentList));
+    el('ed-ctx-dedent').addEventListener('click', runContextMenuAction(formatDedentList));
     el('ed-ctx-date').addEventListener('click', runContextMenuAction(insertDate));
+    el('ed-ctx-eval').addEventListener('click', runContextMenuAction(evalSelection));
     document.addEventListener('click', e => {
       if (el('ed-context-menu').hidden) return;
       if (el('ed-context-menu').contains(e.target)) return;
@@ -1417,5 +1742,5 @@ const Editor = (() => {
     return _file ? _file.path : null;
   }
 
-  return { init, open, openOther, requestClose, currentPath };
+  return { init, open, openOther, requestClose, currentPath, isDistractionFree };
 })();

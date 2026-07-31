@@ -30,6 +30,10 @@ const INI = (() => {
     file_list_sidebar_mode:          ['fileListSidebarMode', 'bool'],
     file_list_sidebar_width:         ['fileListSidebarWidth', 'int'],
     heading_sizes_enabled:           ['headingSizesEnabled', 'bool'],
+    distraction_free_margin_factor:  ['distractionFreeMarginFactor', 'int'],
+    // `previewCustomCss` (round 25) est délibérément absent : du CSS
+    // multi-lignes ne survivrait pas au format `clé = valeur` de ce
+    // fichier — IndexedDB seul (voir state.js).
   };
   const REVERSE_MAP = Object.fromEntries(Object.entries(KEY_MAP).map(([k, [jsKey]]) => [jsKey, k]));
 

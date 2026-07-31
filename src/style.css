@@ -62,6 +62,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; padding: 3px 8px; }
 .icon-btn svg { display: block; }
+/* Même piège que `.editor-badge` (round 6) : une règle d'auteur définissant
+   `display` a la même spécificité que `[hidden] { display: none }` de la
+   feuille UA et vient après — sans ce correctif, un `.icon-btn` avec
+   l'attribut `hidden` posé par JS resterait visible. */
+.icon-btn[hidden] { display: none; }
 .icon-label-btn { display: inline-flex; align-items: center; gap: 6px; }
 .icon-label-btn svg { display: block; flex-shrink: 0; }
 /* Beats the plain `#editor-menu button { display: block }` rule below
@@ -107,6 +112,22 @@ input[type="text"], select {
   text-overflow: ellipsis;
 }
 
+/* Teinte la barre du navigateur avec la couleur d'identification du dépôt
+   actif (round 22, port de BrowserScreen.kt's topBarColors — "pas de
+   propagation à Editor/Search pour limiter la portée du changement", même
+   choix ici : uniquement #browser-header). `>`/`#browser-menu-wrap >` cible
+   seulement les boutons DIRECTS de l'en-tête (retour/rafraîchir/bouton "⋮"
+   lui-même) — jamais `#browser-menu button` (le menu déroulant reste sur
+   son propre fond `--bg-bar`, indépendant de cette teinte). */
+#browser-header.repo-tinted { background: var(--repo-tint-bg); color: var(--repo-tint-fg); }
+#browser-header.repo-tinted #browser-title { color: var(--repo-tint-fg); }
+#browser-header.repo-tinted > button,
+#browser-header.repo-tinted #browser-menu-wrap > button {
+  background: transparent;
+  color: var(--repo-tint-fg);
+  border-color: transparent;
+}
+
 #repo-list, #browser-list {
   flex: 1;
   overflow-y: auto;
@@ -130,6 +151,7 @@ input[type="text"], select {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.file-item-favorite { flex-shrink: 0; display: flex; color: var(--markup); }
 .file-item-meta {
   font-size: 0.75em;
   color: var(--fg-bar);
@@ -168,6 +190,7 @@ input[type="text"], select {
 #browser-search-mode { display: flex; gap: 2px; }
 #browser-search-mode button.active { color: var(--fg); border-color: var(--heading); }
 #browser-search-input { flex: 1; min-width: 120px; }
+#browser-search-scope-btn.active { color: var(--markup); }
 
 /* ─── Settings screen ──────────────────────────────────────────────────── */
 #settings-body { padding: 4px 12px 16px; overflow-y: auto; overscroll-behavior: contain; }
@@ -244,6 +267,24 @@ input[type="text"], select {
 .settings-radio-row { display: flex; align-items: center; gap: 8px; padding: 6px 16px; cursor: pointer; }
 
 .settings-full-width-btn { display: block; width: 100%; margin: 6px 0 10px; text-align: center; }
+
+/* CSS de la prévisualisation, éditable (round 25) — même apparence que
+   #ed-input (monospace, fond de barre) mais en plus petit, ce champ n'a pas
+   besoin de rivaliser en confort d'édition avec l'éditeur de note lui-même. */
+.settings-css-textarea {
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  font-family: monospace;
+  font-size: 0.8em;
+  line-height: 1.4;
+  background: var(--bg-bar);
+  color: var(--fg);
+  border: 1px solid var(--fg-bar);
+  padding: 8px;
+  margin: 6px 0 10px;
+}
 
 #settings-scheme-preview { padding: 4px 0; }
 .scheme-preview-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
@@ -470,6 +511,21 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
 #ed-wrap { position: absolute; inset: 0; }
 #ed-wrap[hidden] { display: none; }
 
+/* ─── Mode sans distraction (round 24) ────────────────────────────────────
+   Masque uniquement #ed-header (le bandeau demandé) — la barre de
+   recherche et le panneau TOC restent inchangés, ce sont des outils que
+   l'utilisateur a lui-même invoqués, pas du chrome permanent. */
+#editor-note-view.distraction-free #ed-header { display: none; }
+#ed-distraction-exit-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  background: var(--bg-bar);
+  opacity: 0.35;
+}
+#ed-distraction-exit-btn:hover { opacity: 1; }
+
 #ed-highlight,
 #ed-input {
   position: absolute;
@@ -563,7 +619,6 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
   flex-direction: column;
 }
 #ed-context-menu[hidden] { display: none; }
-#ed-context-menu .action-row[hidden] { display: none; }
 .ctx-glyph { display: inline-block; width: 18px; flex-shrink: 0; text-align: center; font-size: 0.85em; }
 
 .hl-line { display: inline-block; width: 100%; min-height: 1lh; vertical-align: top; }
@@ -586,6 +641,7 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
 .heading-sizes .hl-h4 { font-size: 1.2em; line-height: calc(var(--ed-line-spacing) / 1.2); }
 .hl-comment { color: var(--comment); }
 .hl-markup { color: var(--markup); }
+.hl-code { color: var(--comment); }
 .hl-search { background: var(--bg-sel); }
 
 #ed-preview {
@@ -599,19 +655,14 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
   line-height: var(--ed-line-spacing);
 }
 #ed-preview[hidden] { display: none; }
-#ed-preview h1, #ed-preview h2, #ed-preview h3,
-#ed-preview h4, #ed-preview h5, #ed-preview h6 { color: var(--heading); margin: 0.6em 0 0.3em; }
-#ed-preview p { margin: 0.4em 0; }
-#ed-preview code, #ed-preview .t2t-code { background: var(--bg-bar); }
-#ed-preview .t2t-code { display: block; padding: 8px; overflow-x: auto; }
-#ed-preview code { padding: 1px 4px; }
-#ed-preview a { color: var(--markup); }
-#ed-preview .zk-link { color: var(--markup); text-decoration: underline dotted; }
-#ed-preview a.zk-link { cursor: pointer; }
-#ed-preview .t2t-image-placeholder { color: var(--fg-bar); font-style: italic; }
-#ed-preview table { border-collapse: collapse; margin: 0.4em 0; }
-#ed-preview th, #ed-preview td { border: 1px solid var(--fg-bar); padding: 4px 8px; }
-#ed-preview hr { border: none; border-top: 1px solid var(--fg-bar); margin: 1em 0; }
+/* Le CSS de CONTENU de la prévisualisation (titres, paragraphes, listes,
+   cases à cocher, code, liens, tableaux...) a été déplacé dans
+   `preview-style.js` (`PreviewStyle.DEFAULT_CSS`, round 25) — source unique
+   injectée par `applyPreviewCss()` (app.js) dans une balise <style> dédiée,
+   éditable depuis Réglages > Aperçu. Ne rien réintroduire ici : la règle
+   structurelle ci-dessus (position/inset/overflow/padding/police) reste la
+   SEULE chose propre à #ed-preview dans cette feuille — tout le reste
+   dupliquerait/divergerait de ce que Réglages affiche et injecte réellement. */
 
 /* ─── Zettelkasten: link picker / backlinks / TOC (phases 5-6) ─────────── */
 /* `[open]` (pas juste l'ID) : la feuille UA par défaut d'un <dialog> ferme
@@ -621,8 +672,8 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
    un bloc réellement visible même fermé (round 19bis, bug découvert via le
    panneau de fichiers épinglé : body en `flex-row` en a fait un item de
    la ligne au lieu d'un bloc poussé hors écran par le flux normal). */
-#zklink-picker-dlg[open], #backlinks-dlg[open], #toc-dlg[open], #backup-restore-dlg[open], #tag-browser-dlg[open] { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
-#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header, #tag-browser-header {
+#zklink-picker-dlg[open], #backlinks-dlg[open], #toc-dlg[open], #backup-restore-dlg[open], #tag-browser-dlg[open], #repo-color-dlg[open] { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header, #tag-browser-header, #repo-color-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -632,6 +683,34 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
 }
 #zklink-filter { margin: 8px 12px; }
 #zklink-list, #backlinks-list, #toc-list, #backup-restore-list, #tag-browser-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+
+#repo-color-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px; }
+.repo-color-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.repo-color-swatch:hover { border-color: var(--fg); }
+#repo-color-none { margin: 0 12px 12px; }
+
+/* Bloc "couleur personnalisée" (round 26/27) — un groupe à part, distinct
+   de la liste de pastilles/"Aucune couleur" au-dessus : la pastille
+   (`.repo-color-swatch`, même style que les 8 fixes) sert ELLE-MÊME de
+   déclencheur du sélecteur natif, "Valider" est juste à côté plutôt que
+   noyé dans une ligne séparée du menu "couleur du dépôt" — demande
+   explicite de l'utilisateur ("je parlais d'avoir ça dans le color picker,
+   pas dans le menu couleur du dépôt"). Vide (jamais encore choisie cette
+   session) : fond transparent + icône goutte en overlay (voir
+   `updateCustomColorSwatch()`, repositories.js) plutôt qu'un rond plein
+   d'une couleur arbitraire qu'on pourrait confondre avec un vrai choix.
+   "Valider" reste désactivé (pas masqué) tant qu'aucune couleur n'a été
+   choisie — toujours visible, pour que le groupe garde sa forme stable. */
+#repo-color-custom-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; }
+#repo-color-custom-row > span:first-child { flex: 1; }
+#repo-color-custom-swatch { display: flex; align-items: center; justify-content: center; }
 
 .tag-browser-item {
   display: flex;
@@ -747,6 +826,12 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
 }
 .action-row:hover { background: var(--bg-sel); }
 .action-row:disabled { opacity: 0.6; cursor: default; }
+/* Même piège générique que `.icon-btn[hidden]` (round 24) : `display: flex`
+   d'auteur bat `[hidden] { display: none }` de la feuille UA à spécificité
+   égale — nécessaire dès qu'un `.action-row` est togglé par l'attribut
+   `hidden` (round 26 : `#repo-color-custom-confirm`) plutôt que toujours
+   présent/masqué autrement. */
+.action-row[hidden] { display: none; }
 
 /* `[open]` — voir le commentaire au-dessus de #zklink-picker-dlg. */
 #note-move-dlg[open] { width: min(440px, 92vw); max-height: 78vh; display: flex; flex-direction: column; }

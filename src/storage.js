@@ -9,7 +9,7 @@
 // IndexedDB round-trip) and global app settings/meta.
 const Storage = (() => {
   const DB_NAME = 'zettelium';
-  const DB_VER  = 2;
+  const DB_VER  = 3;
   let _db = null;
 
   function open() {
@@ -30,6 +30,17 @@ const Storage = (() => {
         // moteur Tcl ne s'applique pas ici non plus qu'à zettelium-android).
         if (!db.objectStoreNames.contains('cursors')) {
           db.createObjectStore('cursors', { keyPath: 'key' });
+        }
+        // Favoris par note (round 28 Android), clé = `${repositoryId}::${path}`
+        // — même convention que `cursors` ci-dessus, DB_VER 2 → 3 (migration
+        // additive non destructive, seuls les stores manquants sont créés).
+        // Délibérément PAS inclus dans l'export durable `zettelium.ini` (voir
+        // ini.js) : même limite déjà assumée pour `cursors` — un
+        // `repositoryId` est un UUID généré à l'ajout du dépôt, donc une clé
+        // `${repositoryId}::${path}` ne survivrait de toute façon pas à une
+        // purge/ré-ajout (le dépôt obtiendrait un nouvel id).
+        if (!db.objectStoreNames.contains('favorites')) {
+          db.createObjectStore('favorites', { keyPath: 'key' });
         }
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
@@ -71,5 +82,18 @@ const Storage = (() => {
     return tx('cursors', 'readwrite', s => s.put({ key, offset }));
   }
 
-  return { getAllRepositories, putRepository, deleteRepository, getMeta, setMeta, getCursor, setCursor };
+  function getAllFavorites() {
+    return tx('favorites', 'readonly', s => s.getAll()).then(rows => (rows || []).map(r => r.key));
+  }
+  function putFavorite(key) {
+    return tx('favorites', 'readwrite', s => s.put({ key }));
+  }
+  function deleteFavorite(key) {
+    return tx('favorites', 'readwrite', s => s.delete(key));
+  }
+
+  return {
+    getAllRepositories, putRepository, deleteRepository, getMeta, setMeta, getCursor, setCursor,
+    getAllFavorites, putFavorite, deleteFavorite,
+  };
 })();

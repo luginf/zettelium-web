@@ -29,7 +29,7 @@ const Index = (() => {
     return null;
   }
 
-  function buildEntry(file, content, indexedAt, idRegex) {
+  function buildEntry(repositoryId, file, content, indexedAt, idRegex) {
     const blocks = Txt2TagsParser.parse(content);
     const title = Txt2TagsSummary.extractTitle(blocks, file.name);
     const heading = firstHeadingText(blocks);
@@ -37,7 +37,7 @@ const Index = (() => {
     const zkId = ZettelkastenLinks.extractId(file.name, content, idRegex);
     const links = ZettelkastenLinks.findLinks(content);
     return {
-      path: file.path, name: file.name, fileHandle: file.fileHandle,
+      repositoryId, path: file.path, name: file.name, fileHandle: file.fileHandle,
       title, heading, tags, zkId, links, content,
       lastModified: file.lastModified, lastIndexed: indexedAt,
     };
@@ -86,7 +86,7 @@ const Index = (() => {
         console.error(`Échec d'indexation de "${file.path}"`, e);
         continue;
       }
-      state.entries.set(file.path, buildEntry(file, content, now, idRegex));
+      state.entries.set(file.path, buildEntry(repo.id, file, content, now, idRegex));
     }
 
     for (const path of [...state.entries.keys()]) {
@@ -106,12 +106,23 @@ const Index = (() => {
     } catch (_) {
       // conserve la valeur fournie par l'appelant
     }
-    state.entries.set(file.path, buildEntry({ ...file, lastModified }, content, Date.now(), idRegex));
+    state.entries.set(file.path, buildEntry(repositoryId, { ...file, lastModified }, content, Date.now(), idRegex));
   }
 
   function entries(repositoryId) {
     const state = byRepo.get(repositoryId);
     return state ? [...state.entries.values()] : [];
+  }
+
+  /** Recherche multi-dépôts (round 27a Android) : toutes les entrées de tous
+   *  les dépôts déjà indexés, portant chacune son `repositoryId` (voir
+   *  buildEntry) — nécessaire pour que l'appelant sache dans quel dépôt
+   *  ouvrir le résultat cliqué, contrairement à `entries(repositoryId)` où
+   *  le dépôt est déjà implicite. */
+  function entriesAllRepos() {
+    const all = [];
+    for (const state of byRepo.values()) all.push(...state.entries.values());
+    return all;
   }
 
   function findByPath(repositoryId, path) {
@@ -191,5 +202,5 @@ const Index = (() => {
     return repairedCount;
   }
 
-  return { indexRepository, indexNote, entries, findByPath, findByZkId, backlinksFor, repairBacklinksFor, repairAllLinks };
+  return { indexRepository, indexNote, entries, entriesAllRepos, findByPath, findByZkId, backlinksFor, repairBacklinksFor, repairAllLinks };
 })();

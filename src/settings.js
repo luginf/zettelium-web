@@ -34,6 +34,9 @@ const Settings = (() => {
   const MIN_FONT_SIZE = 10, MAX_FONT_SIZE = 32, FONT_SIZE_STEP = 1;
   const MIN_MARGIN = 0, MAX_MARGIN = 200, MARGIN_STEP = 4;
   const MIN_LINE_SPACING = 0.8, MAX_LINE_SPACING = 3.0, LINE_SPACING_STEP = 0.1;
+  // Pas d'équivalent Android (round 25, web-only) — "doubler ou tripler",
+  // borné à 5 pour garder un peu de marge de manœuvre au-delà de 3.
+  const MIN_DISTRACTION_MARGIN_FACTOR = 1, MAX_DISTRACTION_MARGIN_FACTOR = 5, DISTRACTION_MARGIN_FACTOR_STEP = 1;
 
   let _returnScreenId = 'repo-screen';
   let _returnIsStickyWorkspace = false; // voir open()/close() ci-dessous
@@ -130,6 +133,12 @@ const Settings = (() => {
     el('settings-toc-sidebar').checked = State.settings.tocSidebarMode;
     el('settings-file-list-sidebar').checked = State.settings.fileListSidebarMode;
     el('settings-heading-sizes').checked = State.settings.headingSizesEnabled;
+
+    // Le champ montre TOUJOURS le CSS réellement en effet — celui
+    // personnalisé s'il existe, sinon le défaut (jamais un champ vide alors
+    // qu'un style s'applique bel et bien) : "expose le CSS utilisé", pas
+    // juste un champ vierge à remplir.
+    el('settings-preview-css').value = State.settings.previewCustomCss || PreviewStyle.DEFAULT_CSS;
 
     syncRadioGroup('settings-language', State.settings.language);
 
@@ -228,11 +237,20 @@ const Settings = (() => {
       () => State.settings.editorMarginY, setEditorMarginY, MIN_MARGIN, MAX_MARGIN, MARGIN_STEP);
     const renderLineSpacing = wireStepper('settings-line-spacing',
       () => State.settings.editorLineSpacing, setEditorLineSpacing, MIN_LINE_SPACING, MAX_LINE_SPACING, LINE_SPACING_STEP, 1);
-    _renderSteppers = () => { renderFontSize(); renderMarginX(); renderMarginY(); renderLineSpacing(); };
+    const renderDistractionMargin = wireStepper('settings-distraction-margin',
+      () => State.settings.distractionFreeMarginFactor, setDistractionFreeMarginFactor,
+      MIN_DISTRACTION_MARGIN_FACTOR, MAX_DISTRACTION_MARGIN_FACTOR, DISTRACTION_MARGIN_FACTOR_STEP);
+    _renderSteppers = () => { renderFontSize(); renderMarginX(); renderMarginY(); renderLineSpacing(); renderDistractionMargin(); };
     el('settings-autosave').addEventListener('change', e => setAutosaveEnabled(e.target.checked));
     el('settings-toc-sidebar').addEventListener('change', e => setTocSidebarMode(e.target.checked));
     el('settings-file-list-sidebar').addEventListener('change', e => setFileListSidebarMode(e.target.checked));
     el('settings-heading-sizes').addEventListener('change', e => setHeadingSizesEnabled(e.target.checked));
+
+    el('settings-preview-css').addEventListener('change', e => setPreviewCustomCss(e.target.value));
+    el('settings-preview-css-reset').addEventListener('click', async () => {
+      await setPreviewCustomCss('');
+      sync(); // réaffiche le CSS par défaut dans le champ (jamais laissé vide)
+    });
 
     el('settings-scheme').addEventListener('change', async e => {
       await setScheme(e.target.value);

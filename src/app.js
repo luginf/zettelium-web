@@ -43,14 +43,36 @@ function applyTheme(schemeName = 'default', themeMode = 'system') {
 // "sur le modèle de zettelium-android") appliqués via les mêmes variables
 // CSS déjà utilisées par style.css (--ed-*), jusqu'ici figées à des valeurs
 // par défaut fixes.
+// Le facteur de grossissement des marges (round 25) ne s'applique QUE
+// pendant que le mode sans distraction est actif (`Editor.isDistractionFree()`)
+// — en dehors de ce mode, `editorMarginX`/`editorMarginY` s'appliquent tels
+// quels, comportement historique inchangé. Point d'entrée UNIQUE pour les
+// marges (Réglages, toggle du mode sans distraction) : pas de logique de
+// grossissement dupliquée ailleurs.
 function applyEditorTypography() {
   const root = document.documentElement.style;
   const s = State.settings;
+  const marginFactor = Editor.isDistractionFree() ? Math.max(1, s.distractionFreeMarginFactor || 1) : 1;
   root.setProperty('--ed-font-family', s.editorFontFamily);
   root.setProperty('--ed-font-size', s.editorFontSize + 'px');
-  root.setProperty('--ed-margin-x', s.editorMarginX + 'px');
-  root.setProperty('--ed-margin-y', s.editorMarginY + 'px');
+  root.setProperty('--ed-margin-x', (s.editorMarginX * marginFactor) + 'px');
+  root.setProperty('--ed-margin-y', (s.editorMarginY * marginFactor) + 'px');
   root.setProperty('--ed-line-spacing', String(s.editorLineSpacing));
+}
+
+// Injecte le CSS de la prévisualisation dans une balise <style> dédiée
+// (round 25, demande explicite : exposer ce CSS dans Réglages et permettre
+// de l'éditer). Réglage vide (jamais personnalisé, ou vidé par
+// l'utilisateur) retombe sur `PreviewStyle.DEFAULT_CSS` — l'un OU l'autre
+// est injecté, jamais une fusion des deux.
+function applyPreviewCss() {
+  let styleEl = document.getElementById('preview-custom-style');
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = 'preview-custom-style';
+    document.head.appendChild(styleEl);
+  }
+  styleEl.textContent = State.settings.previewCustomCss || PreviewStyle.DEFAULT_CSS;
 }
 
 // Largeur du panneau de fichiers épinglé (round 19bis) — variable CSS
@@ -77,6 +99,7 @@ async function init() {
   await Promise.all([loadState(), Themes.loadCustomSchemes()]);
   applyTheme(State.settings.scheme, State.settings.themeMode); // the persisted choice, once known
   applyEditorTypography();
+  applyPreviewCss();
   applyFileListSidebarWidth();
   document.documentElement.classList.toggle('heading-sizes', State.settings.headingSizesEnabled);
   I18n.apply();

@@ -95,5 +95,112 @@ const EditorFormatting = (() => {
     return { rangeStart: lineStart, rangeEnd: lineEnd, replacement: newLine, cursorStart: cursor, cursorEnd: cursor };
   }
 
-  return { wrapInline, toggleLinePrefix, toggleHeading };
+  // --- Gestion des listes (round 32/34 zettelium-android) -----------------
+
+  /**
+   * Reconnaît une ligne de liste txt2tags (`-`/`+`/`:`) et sépare son
+   * marqueur (indent compris) de son contenu — `null` si `line` n'est pas un
+   * item de liste. Essaie d'abord la grammaire d'OUVERTURE du parseur
+   * (`Txt2TagsRegexes.list`/`numlist`/`deflist`, qui exige un contenu non
+   * vide après le marqueur), puis `Txt2TagsRegexes.listClose` (marqueur
+   * seul, sans contenu — la même regex que le parseur utilise pour repérer
+   * la fin d'une liste) : sans ce second essai, une ligne "- " vide ne
+   * serait reconnue comme item de liste par aucune des trois premières
+   * regex (leur lookahead exige un caractère non-espace après le marqueur),
+   * cassant la sortie de liste sur item vide de `continueListOnNewline`.
+   */
+  function listMarkerOf(line) {
+    let m = Txt2TagsRegexes.list.exec(line);
+    if (m) return { prefix: line.slice(0, m[0].length), content: line.slice(m[0].length).trim() };
+    m = Txt2TagsRegexes.numlist.exec(line);
+    if (m) return { prefix: line.slice(0, m[0].length), content: line.slice(m[0].length).trim() };
+    m = Txt2TagsRegexes.deflist.exec(line);
+    if (m) return { prefix: `${m[1]}: `, content: m[3].trim() };
+    m = Txt2TagsRegexes.listClose.exec(line);
+    if (m) return { prefix: `${m[1]}${m[2]} `, content: '' };
+    return null;
+  }
+
+  /**
+   * Continuation automatique du marqueur de liste à l'Entrée : `text`/
+   * `cursor` = texte et position du curseur juste APRÈS l'insertion d'un
+   * unique "\n" par l'utilisateur — ne doit être appelé que pour une frappe
+   * Entrée isolée, jamais un collage multi-lignes (voir editor.js, filtré
+   * sur `InputEvent.inputType === 'insertLineBreak'`). Si la ligne qui
+   * vient de se terminer est un item de liste NON VIDE, reconduit le même
+   * marqueur (indent/type identiques) sur la nouvelle ligne ; si elle ne
+   * contenait QUE le marqueur (item vide), le retire au lieu de le
+   * reconduire — convention "ligne vide = sortir de la liste", plutôt que
+   * d'empiler des marqueurs vides indéfiniment. `null` si la ligne
+   * précédente n'était pas un item de liste (rien à faire).
+   *
+   * Cas particulier des cases à cocher (`- [ ] tâche`, round 34, demande
+   * utilisateur explicite) : continuer un item non ordonné qui EST une case
+   * à cocher insère une case FRAÎCHE (toujours décochée, `"[ ] "`) sur la
+   * ligne suivante plutôt que de répéter juste `"- "` (qui perdrait la
+   * convention case à cocher dès le deuxième item) ; un item "vide" au sens
+   * de la sortie de liste devient alors "case sans libellé" plutôt que
+   * "rien après le marqueur". Restreint aux listes non ordonnées (marqueur
+   * `-`) — même restriction que le rendu de l'aperçu (render.js), une liste
+   * numérotée/de définition n'a pas vocation à porter des cases.
+   */
+  function continueListOnNewline(text, cursor) {
+    if (cursor <= 0 || text[cursor - 1] !== '\n') return null;
+    const prevLineEnd = cursor - 1;
+    const prevLineStart = text.lastIndexOf('\n', prevLineEnd - 1) + 1;
+    const marker = listMarkerOf(text.slice(prevLineStart, prevLineEnd));
+    if (!marker) return null;
+    const withoutTrailingSpace = marker.prefix.slice(0, -1);
+    const markerChar = withoutTrailingSpace[withoutTrailingSpace.length - 1];
+    const isUnordered = markerChar === '-' || markerChar === '*';
+    const checkbox = isUnordered ? Txt2TagsChecklist.parseCheckbox(marker.content) : null;
+    const isEmpty = checkbox ? checkbox.label === '' : marker.content === '';
+    if (isEmpty) {
+      return { rangeStart: prevLineStart, rangeEnd: cursor, replacement: '', cursorStart: prevLineStart, cursorEnd: prevLineStart };
+    }
+    const insertion = checkbox ? marker.prefix + '[ ] ' : marker.prefix;
+    const newCursor = cursor + insertion.length;
+    return { rangeStart: cursor, rangeEnd: cursor, replacement: insertion, cursorStart: newCursor, cursorEnd: newCursor };
+  }
+
+  const LIST_INDENT_UNIT = '  ';
+  const LIST_MARKER_LINE = /^( *)([-*+:]) /;
+
+  function transformListLines(text, selStart, selEnd, transform) {
+    const start = Math.min(selStart, selEnd);
+    const end = Math.max(selStart, selEnd);
+    const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+    const lineEndSearch = text.indexOf('\n', end);
+    const lineEnd = lineEndSearch === -1 ? text.length : lineEndSearch;
+    const block = text.slice(lineStart, lineEnd);
+    const newLines = block.split('\n').map(line => {
+      const m = LIST_MARKER_LINE.exec(line);
+      return m ? transform(line, m[1]) : line;
+    });
+    const newBlock = newLines.join('\n');
+    const cursorEnd = Math.max(lineStart, lineEnd + (newBlock.length - block.length));
+    return { rangeStart: lineStart, rangeEnd: lineEnd, replacement: newBlock, cursorStart: lineStart, cursorEnd };
+  }
+
+  /** Ajoute `LIST_INDENT_UNIT` avant le marqueur de chaque ligne de liste
+   *  (`-`/`+`/`:`) couverte par la sélection — fait descendre l'item d'un
+   *  niveau d'imbrication. Les lignes qui ne sont pas des items de liste
+   *  sont laissées telles quelles (pas d'indentation générique de
+   *  paragraphe). */
+  function indentListLines(text, selStart, selEnd) {
+    return transformListLines(text, selStart, selEnd, line => LIST_INDENT_UNIT + line);
+  }
+
+  /** Retire jusqu'à `LIST_INDENT_UNIT` d'espaces en tête de chaque ligne de
+   *  liste sélectionnée — sans effet sur une ligne déjà à la racine (indent
+   *  0) ou qui n'est pas un item de liste. */
+  function dedentListLines(text, selStart, selEnd) {
+    return transformListLines(text, selStart, selEnd, (line, indent) =>
+      line.slice(Math.min(indent.length, LIST_INDENT_UNIT.length)));
+  }
+
+  return {
+    wrapInline, toggleLinePrefix, toggleHeading,
+    continueListOnNewline, indentListLines, dedentListLines,
+  };
 })();

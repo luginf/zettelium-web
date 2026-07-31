@@ -195,7 +195,7 @@ const Txt2TagsParser = (() => {
 
     markerMatches(frame, marker) {
       switch (marker) {
-        case '-': return !frame.isDef && !frame.ordered;
+        case '-': case '*': return !frame.isDef && !frame.ordered;
         case '+': return !frame.isDef && frame.ordered;
         case ':': return frame.isDef;
         default: return false;

@@ -506,6 +506,33 @@ réelles**, même limite que documentée pour toutes les phases précédentes.
   interligne) vivent dans l'écran Réglages global, pas dans l'éditeur
   lui-même** — demande explicite de l'utilisateur, cohérent avec
   `SettingsScreen.kt` (section "Éditeur" avant "Thème").
+- **`*` est un alias markdown de `-` pour les listes non ordonnées**
+  (round 22) — déviation **web-only** par rapport à zettelium-android et à
+  la syntaxe txt2tags d'origine, demande explicite de l'utilisateur. Ne pas
+  reporter côté Android sans demande séparée ; voir `regexes.js`
+  (`list`/`listClose`) et `editor-formatting.js`.
+- **Le mode sans distraction de l'éditeur (round 24) est web-only**, sans
+  équivalent Android — ne masque QUE `#ed-header`, jamais la barre de
+  recherche en note ni le panneau TOC latéral s'ils sont déjà ouverts. Ne
+  pas reporter côté Android sans demande séparée ; voir `editor.js`
+  `applyDistractionFree()`.
+- **Tout `.icon-btn` togglé par l'attribut `hidden` a besoin de
+  `.icon-btn[hidden] { display: none; }`** (style.css, ajouté round 24) —
+  même piège générique que `.editor-badge` (round 6) : une règle d'auteur
+  définissant `display` bat toujours la règle UA `[hidden]` à spécificité
+  égale. Ne pas retirer cette règle générique ni la remplacer par des
+  correctifs ciblés par ID.
+- **Le CSS de contenu de `#ed-preview` vit dans `src/preview-style.js`
+  (`PreviewStyle.DEFAULT_CSS`), pas dans `style.css`** (round 25) — source
+  unique, injectée par `applyPreviewCss()` (app.js) et éditable dans
+  Réglages > Aperçu. Seule la règle STRUCTURELLE de `#ed-preview`
+  (position/inset/overflow/padding/police) reste dans `style.css`. Ne pas
+  réintroduire de règles `#ed-preview ...` de contenu dans `style.css` —
+  ça diverge silencieusement de ce que Réglages affiche/injecte.
+- **Le facteur de grossissement des marges en mode sans distraction (round
+  25) est web-only**, sans équivalent Android — voir
+  `State.settings.distractionFreeMarginFactor`, lu uniquement par
+  `applyEditorTypography()` (app.js) via `Editor.isDistractionFree()`.
 
 **Round 6 (2026-07-14, retour utilisateur) — pastille "0" backlinks
 affichée à tort** : la pastille du nombre de backlinks (`#editor-backlinks-badge`)
@@ -1556,6 +1583,696 @@ message.
   physiques, ressenti de réactivité) — à confirmer par l'utilisateur, en
   particulier si "moins réactif" a une autre cause que celle identifiée
   ici.
+
+**Round 21 (2026-07-31) — rattrapage de parité avec zettelium-android
+(rounds 25-36, 2026-07-23 à 2026-07-30)** : demande explicite de l'utilisateur
+("implémente... les dernières modifications de la version android"), après
+avoir listé l'écart complet et laissé l'utilisateur choisir le périmètre.
+Retenus : favoris, recherche multi-dépôts, évaluation d'expressions, gestion
+des listes, blocs de code avec langage. Écartés explicitement par
+l'utilisateur : "garder l'écran allumé" (25) et notes chiffrées compatibles
+QOwnNotes (27b). Non applicables au web (non proposés) : raccourcis
+d'application (29, spécifique lanceur Android) et corrections UI Compose
+(35, sans équivalent ici).
+- **Blocs de code avec identifiant de langage** (round 36 Android) :
+  `Txt2TagsRegexes.blockVerbOpen` passe de `/^```\s*$/` à `/^```(\S*)\s*$/`
+  (identifiant de langage optionnel collé, style Markdown/GitHub, ex.
+  ` ```kotlin `) — `blockVerbClose` n'est PLUS un alias de `blockVerbOpen`
+  (contrairement à avant ce round, comme `blockRawOpen`/`blockTaggedOpen` le
+  restent) : la fermeture doit rester stricte (nue), sinon une ligne de
+  clôture avec du texte parasite serait acceptée à tort. `highlight.js` :
+  nouvel état ouvert/fermé porté d'une ligne à l'autre (mêmes 3 paires de
+  délimiteurs que le parseur) — aucune ligne à l'intérieur d'un bloc de code
+  ne reçoit plus de span markup/titre/commentaire, cohérent avec l'aperçu
+  qui traite déjà tout `CodeBlock` comme texte opaque.
+- **Évaluation d'expressions dans le menu contextuel** (round 30/31/33
+  Android) : nouveau `src/math-eval.js` — port JS pur de `SExprEval.kt`
+  (préfixe Lisp, ex. `(+ 1 2)`), `RpnEval.kt` (RPN/Forth, ex. `34 12 -`),
+  `InfixEval.kt` (infixe calculatrice, `=` final obligatoire, ex. `34-12=`)
+  et `MathExprEval.kt` (dispatch par forme de la sélection, sans ambiguïté :
+  `=` final → infixe ; sinon `(` en tête → préfixe ; sinon → RPN ; mise en
+  forme du résultat différenciée par notation — round 33). **Différence
+  délibérée avec le Kotlin** : pas de sealed class `Result`, chaque
+  évaluateur renvoie `{ok, resultText}`/`{ok: false, message}` (objet JS
+  simple). `Double.mod()` de Kotlin (signe du diviseur, comme Python) reconstruit
+  via `pyMod(a,b) = a - floor(a/b)*b`, pas l'opérateur `%` de JS (signe du
+  dividende). Nouvelle entrée "Évaluer" (`=` en `ctx-glyph`, comme `%` pour
+  Commentaire) dans le menu contextuel de l'éditeur — visible SEULEMENT si
+  la sélection courante n'est pas vide, remplace la sélection via
+  `execCommand('insertText', ...)` (historique annuler/rétablir préservé,
+  même technique que `applyFormattingResult`).
+- **Gestion des listes** (round 32/34 Android) :
+  - Continuation automatique du marqueur à l'Entrée
+    (`EditorFormatting.continueListOnNewline`, pur, testé) : câblée via
+    `beforeinput`/`input`'s `InputEvent.inputType === 'insertLineBreak'` —
+    équivalent web du `TextWatcher.onTextChanged`'s `before==0 && count==1`
+    Kotlin (isole une frappe Entrée isolée d'un collage multi-lignes,
+    `insertFromPaste`). Retourne `{rangeStart, rangeEnd, replacement,
+    cursorStart, cursorEnd}` (forme déjà en place dans ce fichier), PAS le
+    `Pair<String, Int>` (texte entier) du Kotlin — évite un remplacement
+    intégral du document à chaque Entrée.
+  - Boutons "Liste"/"Case à cocher"/"Indenter"/"Désindenter" dans le menu
+    contextuel — réutilisent `toggleLinePrefix` (Liste/Case) déjà existant ;
+    `indentListLines`/`dedentListLines` (nouveaux, purs, testés) ajoutent/
+    retirent 2 espaces devant le marqueur de chaque ligne de liste
+    sélectionnée.
+  - Cases à cocher `- [ ]`/`- [x]`/`- []` (nouveau `src/txt2tags/
+    checklist.js`, port de `Txt2TagsChecklist.kt`, testé) : convention
+    Zettelium (pas la syntaxe txt2tags d'origine), reconnue a posteriori
+    depuis le texte d'un item de liste NON ordonnée. `assignIndices`
+    utilise une vraie `Map` JS (clés = objets `ListItem`) — contrairement à
+    Kotlin qui a besoin d'un `IdentityHashMap` explicite pour éviter
+    l'égalité structurelle, une `Map` JS utilise déjà l'identité de
+    référence pour des clés objet, donc aucun équivalent à coder. `render.js`
+    rend un vrai `<input type="checkbox">` cliquable (`data-checkbox-index`,
+    `opts.checklistIndices` calculé une fois sur l'AST complet, comme
+    `PreviewScreen.checkboxOf`/Android) ; clic → `Txt2TagsChecklist.toggle`
+    + `replaceAllContent` (undo-safe, même technique que la restauration de
+    sauvegarde) + re-rendu de l'aperçu.
+- **Favoris** (round 28 Android) : nouveau store IndexedDB `favorites`
+  (`storage.js`, DB_VER 2→3, migration additive), clé
+  `${repositoryId}::${path}` — même convention que `cursors` (round 8),
+  chargé en `Set` dans `State.favorites` au démarrage. **Déviation
+  assumée par rapport à Android** : PAS inclus dans l'export durable
+  `zettelium.ini` (contrairement à `zettelium_state.json` côté Android) —
+  un `repositoryId` est un UUID généré à l'ajout du dépôt, une clé
+  `${repositoryId}::${path}` ne survivrait de toute façon pas à une purge/
+  ré-ajout (nouvel id), même limite déjà assumée pour `cursors` sans jamais
+  avoir tenté de la contourner. `state.js` : `toggleFavorite`/`rekeyFavorite`/
+  `removeFavorite`, câblées aux 3 points qui changent déjà le chemin/dépôt
+  d'une note existante (`browser.js` renommage/déplacement, `editor.js`
+  renommage) et à la suppression — jamais à la duplication (décision
+  volontaire, comme Android : une copie ne reprend aucun état dérivé de
+  l'originale). UI : étoile pleine non cliquable dans la ligne de fichier
+  (`Icons.star`, nouveau, `filled` bascule contour/plein) ; bascule en tête
+  du menu ⋮ par note (pas de clic long en web, demande utilisateur "clic
+  long... comme pour renommer" adaptée à l'équivalent web déjà existant).
+- **Recherche multi-dépôts** (round 27a Android, revalidée après avoir été
+  explicitement laissée de côté en phase 4) : `Index.entriesAllRepos()`
+  (nouveau) agrège les entrées de tous les dépôts déjà indexés ; chaque
+  entrée porte désormais un champ `repositoryId` (`buildEntry`, nouveau
+  paramètre) — nécessaire pour savoir dans quel dépôt ouvrir un résultat
+  cliqué, contrairement à `entries(repositoryId)` où c'était implicite.
+  Nouveau bouton bascule "Ce dépôt"/"Tous les dépôts" (`Icons.globe`,
+  nouveau) dans la barre de recherche, visible seulement si plus d'un
+  dépôt (même condition qu'Android : `repositoryNames.size > 1`) — variable
+  de session pure (`_searchScope`, comme `_searchMode`), jamais persistée,
+  retombe à 'repo' à chaque entrée dans un dépôt (`openActive`). Activer
+  "Tous les dépôts" déclenche `Index.indexRepository` en arrière-plan pour
+  chaque dépôt PAS encore indexé (pas attendu — même compromis "résultats
+  partiels qui se complètent" que `reindexActive`, déjà en place depuis la
+  phase 4). **Cliquer un résultat d'un AUTRE dépôt que l'actif bascule
+  d'abord `State.activeRepositoryId`** (+ `scanActiveRepo()`) avant
+  d'ouvrir la note — nécessaire car `Editor.open()` résout `_repo` via
+  `activeRepository()` en interne, jamais passé explicitement (contrairement
+  à l'`onOpenNote(repositoryId, ...)` d'Android, où `EditorViewModel` est
+  paramétré par `repositoryId` dès sa construction). **Menu d'actions par
+  note (Renommer/Déplacer/Dupliquer/Supprimer) volontairement absent des
+  résultats en portée "Tous les dépôts"** — même choix qu'Android, dont
+  `SearchScreen` n'a aucun menu d'actions par ligne (contrairement à
+  `BrowserScreen`) ; ces actions supposent toutes ici le dépôt ACTIF, ce qui
+  serait incorrect pour une note d'un autre dépôt tant qu'il n'a pas été
+  cliqué.
+- 12 nouvelles clés i18n × 2 langues (177 au total FR/EN toujours
+  strictement synchronisées). `make clean && make` (0 espace réservé
+  résiduel), cross-check de tous les `el('...')`/`getElementById(...)`
+  contre les `id="..."` de `template.html` (aucun manquant), `make test`
+  (192/192, +98 : 34 pour `SExprEval`/`RpnEval`/`InfixEval`/`MathExprEval`,
+  22 pour `continueListOnNewline`/`indentListLines`/`dedentListLines`, 14
+  pour `Txt2TagsChecklist`, 2 pour le rendu des cases à cocher, 2 pour les
+  blocs de code, +24 divers). Chaque SVG de `icons.js` (23 au total)
+  vérifié bien formé par un script Node jetable (même vérification que le
+  round 7). **Non testé visuellement dans un navigateur réel** (limite
+  habituelle de cet environnement) — en particulier : le clic droit +
+  résultat "Évaluer" en situation réelle, la continuation de liste à
+  l'Entrée avec un IME/clavier physique réel (point le plus sensible au
+  timing réel, dans la lignée des rounds 15/19bis/20 déjà rencontrés sur ce
+  `TextWatcher`/`input` listener), le clic sur une case à cocher dans
+  l'aperçu, le glisser entre dépôts pour la bascule de portée de recherche,
+  et le transfert d'un favori à travers un renommage/déplacement réel.
+
+**Round 22 (2026-07-31) — quatre retours utilisateur indépendants** :
+- **Blocs de code colorés comme les commentaires** : `highlight.js` enveloppe
+  désormais chaque ligne opaque de bloc de code (verbatim/raw/tagged, round
+  36) dans `<span class="hl-code">` (au lieu d'un texte échappé nu, sans
+  classe) ; `style.css` : `.hl-code { color: var(--comment); }` (éditeur) et
+  `#ed-preview code, #ed-preview .t2t-code { ...; color: var(--comment); }`
+  (aperçu, qui n'avait jusqu'ici qu'un fond `--bg-bar` sans couleur de texte
+  dédiée). Les 4 tests existants sur les blocs de code opaques mis à jour en
+  conséquence (assertions sur le HTML exact).
+- **`*` comme alias markdown de `-` pour les listes non ordonnées** :
+  déviation **web-only**, demande explicite de l'utilisateur (zettelium-
+  android n'a pas cette syntaxe, voir "Décisions structurantes" — ne pas la
+  reporter côté Android sans demande séparée). `Txt2TagsRegexes.list`
+  (`/^( *)([-*]) (?=[^ ])/`) et `listClose` (`/^( *)([-*+:])\s*$/`) acceptent
+  désormais `*` ; `Txt2TagsParser.markerMatches` traite `'*'` comme `'-'`
+  (liste non ordonnée) — une liste mêlant `- item`/`* item` au même niveau
+  fusionne en un seul `ListNode` (comportement voulu, `*` est un pur alias,
+  pas un type de liste distinct). `EditorFormatting.continueListOnNewline`
+  (vérifie `-`/`*` pour la restriction "case à cocher réservée aux listes
+  non ordonnées") et `LIST_MARKER_LINE` (indent/dedent) mis à jour de même.
+  `Txt2TagsChecklist.toggle`/`assignIndices` héritent du support `*`
+  gratuitement (ils réutilisent `Txt2TagsRegexes.list`, pas de logique
+  dupliquée). Vérifié qu'un paragraphe commençant par `**gras**` n'est
+  jamais pris pour un item de liste (le marqueur exige exactement UN `*`/`-`
+  suivi d'un espace, `**` collés ne matchent pas).
+- **Croix pour effacer la recherche** : nouveau bouton
+  `#browser-search-clear-btn` ("✕"), affiché à droite de
+  `#browser-search-input` (avant les boutons tags/portée/tri), visible
+  seulement quand le champ n'est pas vide (`render()`, même point que le
+  calcul de `query`). Clic : vide le champ, lui rend le focus, ré-affiche
+  immédiatement (pas de debounce à attendre pour un clic explicite,
+  contrairement à la frappe).
+- **Couleurs par dépôt** (port de `RepositoryColorTag.kt`) : `colorTag`
+  existait déjà dans le modèle `Repository` depuis la phase 1
+  (`State.repositories`) mais n'était jamais exposé à l'utilisateur — bordure
+  gauche de `.repo-item` déjà câblée en pure attente. `state.js` :
+  `REPOSITORY_COLOR_SWATCHES` (mêmes 8 teintes hex qu'Android, pour une
+  identité visuelle cohérente entre les deux plateformes), `readableTextColor`
+  (port fidèle de la formule de luminance relative sRGB de
+  `Color.luminance()` — noir ou blanc selon `> 0.5`), `setColorTag(repo,
+  hex)` (persistance IndexedDB seule, **pas** d'export durable — même choix
+  qu'Android, un champ Room jamais exporté dans `zettelium_state.json`).
+  `repositories.js` : nouveau bouton "goutte" (`Icons.droplet`, pas de glyphe
+  "palette" simple/connu dans ce sous-ensemble Feather) par ligne de dépôt,
+  ouvre `#repo-color-dlg` (8 pastilles rondes + "Aucune couleur"). `browser.js`
+  : `applyRepoColorTint()` (appelée depuis `render()`) teinte
+  `#browser-header` via des variables CSS (`--repo-tint-bg`/`--repo-tint-fg`)
+  et une classe `.repo-tinted` — **scopée précisément aux boutons DIRECTS de
+  l'en-tête** (`#browser-header.repo-tinted > button`,
+  `#browser-header.repo-tinted #browser-menu-wrap > button`), jamais
+  `#browser-menu button` (le menu déroulant "⋮" garde son propre fond
+  `--bg-bar`, indépendant) — sans ce scope précis, les entrées du menu
+  déroulant auraient hérité d'une couleur de texte calculée pour contraster
+  avec la couleur du DÉPÔT, pas avec le fond réel du menu. **Portée
+  volontairement limitée à `#browser-header`, jamais l'éditeur/les
+  réglages** — même choix qu'Android (`BrowserScreen.kt` : "pas de
+  propagation à Editor/Search pour limiter la portée du changement").
+- 8 nouvelles clés i18n × 2 langues (181 au total FR/EN toujours strictement
+  synchronisées). `make clean && make` (0 espace réservé résiduel),
+  cross-check des IDs, `make test` (198/198, +6 : 4 pour l'alias `*` au
+  niveau parseur/formatage/checklist, 2 pour la coloration des blocs de
+  code — la croix d'effacement et la teinte par dépôt touchent le DOM réel,
+  non testables dans la suite Node). 24 icônes vérifiées bien formées.
+  **Non testé visuellement dans un navigateur réel** — en particulier le
+  contraste réel de `readableTextColor` sur chacune des 8 teintes (calculé
+  et vérifié par script Node, jamais rendu à l'écran) et le scope exact de
+  la teinte d'en-tête (bouton "⋮" vs menu déroulant).
+
+**Round 23 (2026-07-31) — deux bugs signalés par capture d'écran** :
+- **Le bouton retour (flèche "←") de l'en-tête du navigateur ne ramenait
+  plus jamais à la liste des dépôts** (il fallait recharger la page) :
+  `Editor.requestClose()` (editor.js) ne renvoyait **aucune valeur** — donc
+  toujours `undefined`. `Browser.backOrUp()` (round 19, browser.js)
+  teste `if (!(await Editor.requestClose())) return;` avant d'appeler
+  `Repositories.showList()` : `!undefined` valant `true`, ce `return`
+  s'exécutait systématiquement, empêchant `showList()` d'être atteint —
+  cassé dès l'introduction de ce garde-fou au round 19 (avant, `backOrUp()`
+  n'appelait pas encore `requestClose()`). Corrigé : `requestClose()`
+  renvoie maintenant `false` si l'utilisateur annule via la boîte de
+  dialogue de confirmation (`requestLeave()` a renvoyé `false`), `true`
+  sinon (fermeture effectuée, ou no-op sûr si aucune note n'était ouverte).
+  L'autre appelant (`#editor-back-btn`) ignore déjà la valeur de retour,
+  aucun changement de comportement de son côté.
+- **Les listes de l'aperçu n'étaient plus du tout indentées, et la case à
+  cocher d'un item `- [ ]` débordait/était coupée à gauche** : le reset
+  CSS global (`*, *::before, *::after { margin: 0; padding: 0; }`,
+  style.css ligne 30) annule le `padding-left` par défaut du navigateur sur
+  `ul`/`ol` (habituellement ~40px, source de l'indentation standard d'une
+  liste) — jamais recréé explicitement pour `#ed-preview ul`/`ol`. La règle
+  `li.t2t-checklist-item { margin-left: -1.2em }` (calibrée à l'origine en
+  supposant CE padding par défaut du navigateur, pour annuler l'indentation
+  et aligner la case à cocher au bord gauche du conteneur) devenait donc une
+  marge négative appliquée à un `padding-left` déjà nul — poussant la case à
+  cocher visiblement hors cadre. Corrigé en ajoutant `#ed-preview ul,
+  #ed-preview ol { padding-left: 1.6em; margin: 0.4em 0; }` (restaure
+  l'indentation) et en alignant exactement `li.t2t-checklist-item`'s
+  `margin-left` sur `-1.6em` (la même valeur, pas une approximation) pour
+  qu'elle annule précisément ce padding plutôt qu'une supposition sur la
+  valeur par défaut du navigateur.
+- `make clean && make test` (198/198, inchangé — les deux corrections
+  touchent le DOM réel/CSS, pas de logique pure). **Non testé visuellement
+  dans un navigateur réel** (limite habituelle de cet environnement) — les
+  deux bugs ont été root-causés par lecture de code (le premier : recherche
+  de tous les appelants de `requestClose()` et de sa valeur de retour ; le
+  second : repérage du reset CSS global combiné à la valeur `margin-left`
+  pré-existante), pas par reproduction pixel par pixel comme les rounds
+  13/19bis/20/20bis — à confirmer par l'utilisateur.
+
+**Round 24 (2026-07-31) — mode sans distraction dans l'éditeur, couleur
+personnalisée par dépôt** : deux demandes explicites, aucun équivalent
+Android pour la première (web-only, comme le "*" de liste round 22).
+- **Mode sans distraction** (nouvelle entrée en tête du menu "⋮" de
+  l'éditeur, `#editor-menu-distraction-free`) : masque uniquement
+  `#ed-header` (le bandeau : titre, TOC, backlinks, aperçu, enregistrer,
+  menu "⋮" lui-même) — demande explicite ("retire le bandeau et ne garde
+  que le texte en cours d'édition"), interprétée littéralement : la barre
+  de recherche en note et le panneau TOC latéral (round 11), s'ils sont
+  déjà ouverts, restent inchangés — ce sont des outils explicitement
+  invoqués par l'utilisateur, pas du chrome permanent au même titre que le
+  bandeau. Variable de session pure `_distractionFree` (editor.js, comme
+  `_previewMode`), jamais persistée, retombe à `false` à chaque fermeture
+  de note (`close()`).
+  - **Problème de conception résolu avant d'écrire du code** : une fois
+    `#ed-header` masqué, le bouton "⋮" qui héberge l'action d'origine
+    disparaît AVEC lui — plus aucun moyen de rouvrir le menu pour désactiver
+    le mode. Deux sorties ajoutées : un petit bouton flottant
+    `#ed-distraction-exit-btn` (icône `Icons.minimize()`, coin haut-droit de
+    `#ed-main`, opacité réduite au repos/pleine au survol — discret mais
+    toujours découvrable) et Échap (étend le listener `keydown` global
+    existant, après les branches déjà présentes pour fermer le menu "⋮" et
+    la barre de recherche — mêmes précédences, un Échap ferme d'abord ce qui
+    est le plus "au-dessus").
+  - **Bug latent découvert en cours de route, corrigé au passage** : le même
+    piège que `.editor-badge` (round 6) existe pour TOUT `.icon-btn` combiné
+    à l'attribut `hidden` — `.icon-btn { display: inline-flex }` (règle
+    d'auteur) a la même spécificité que `[hidden] { display: none }` (règle
+    UA) et la bat systématiquement dans la cascade (les règles d'auteur
+    l'emportent toujours sur la feuille UA à spécificité égale, quel que
+    soit l'ordre des déclarations). Concrètement, ce défaut touchait déjà
+    silencieusement `#browser-tags-btn`/`#browser-search-scope-btn`/
+    `#browser-search-clear-btn` (rounds 5/21/22, jamais remarqué/testé
+    visuellement) en plus du nouveau `#ed-distraction-exit-btn` de ce round.
+    Corrigé une fois pour toutes avec `.icon-btn[hidden] { display: none;
+    }` (règle générique, style.css) plutôt qu'un correctif ciblé par ID —
+    tout futur `.icon-btn` togglé par `hidden` en bénéficie automatiquement.
+  - Nouvelles icônes `Icons.maximize()`/`Icons.minimize()` (Feather
+    "maximize-2"/"minimize-2") — maximize pour l'entrée de menu (agrandir la
+    zone de lecture), minimize pour le bouton de sortie (repli).
+- **Couleur personnalisée par dépôt** (à côté de "Aucune couleur",
+  `#repo-color-dlg`) : nouveau bouton `#repo-color-custom` ("Couleur
+  personnalisée…") ouvrant le sélecteur natif `<input type="color">`
+  (`#repo-color-custom-input`, cliqué par programme) — même choix que
+  l'éditeur de thèmes (`theme-editor.js`, round 4) plutôt qu'une roue
+  teinte/saturation personnalisée, pour la même raison (équivalent déjà
+  fourni gratuitement par tout navigateur). Pré-rempli avec la couleur
+  actuelle du dépôt si elle existe (repli `#808080` sinon). Écoute `change`
+  (pas `input`) : ne valide/ne ferme le dialogue qu'une fois le sélecteur
+  natif refermé par l'utilisateur, pas à chaque glissement continu dans le
+  sélecteur de teinte — même réutilisation de `pickColor()` que les 8
+  pastilles fixes, donc mêmes garanties (persistance IndexedDB seule, pas
+  d'export durable, cf. round 22).
+- 6 nouvelles clés i18n × 2 langues (184 au total FR/EN toujours
+  strictement synchronisées : `editor.distractionFree`,
+  `editor.distractionFreeExitTooltip`, `repo.colorCustom`). `make clean &&
+  make test` (198/198, inchangé — aucune nouvelle logique pure, tout ce
+  round touche DOM/CSS), cross-check des IDs `el('...')`/`getElementById`
+  contre `template.html` (aucun manquant). **Non testé visuellement dans un
+  navigateur réel** (limite habituelle de cet environnement) — en
+  particulier le rendu du bouton flottant par-dessus le texte en mode
+  aperçu vs édition, l'ouverture réelle du sélecteur de couleur natif du
+  système, et l'interaction Échap quand plusieurs éléments sont ouverts en
+  même temps (menu + mode sans distraction).
+
+**Round 25 (2026-07-31) — alignement des cases à cocher dans l'aperçu, CSS
+de la prévisualisation exposé/éditable, marges du mode sans distraction
+ajustables** : trois demandes explicites, la deuxième illustrée par une
+capture d'écran.
+- **Alignement checkbox/puce dans l'aperçu** (capture d'écran à l'appui) :
+  le texte d'une case à cocher (`- [ ] ...`) n'était pas aligné avec le
+  texte d'une puce simple (`- ...`). Cause : la technique round 23 (flex +
+  `margin-left: -1.6em` sur le `<li>` entier, checkbox et texte décalés
+  ENSEMBLE) faisait démarrer le texte à `largeur_checkbox + gap` (~21px) du
+  bord de l'`<ul>`, alors qu'un `<li>` normal démarre son texte à
+  `padding-left` (1.6em, ~25.6px) — deux valeurs sans rapport l'une à
+  l'autre, jamais garanties alignées. Remplacé par une grille CSS à 2
+  colonnes (`grid-template-columns: 1.6em 1fr`) dont la PREMIÈRE colonne
+  fait exactement la même largeur que le `padding-left` de l'`<ul>` : la
+  case à cocher vit dans cette colonne (`justify-self: start`, peu importe
+  sa propre largeur), le texte démarre TOUJOURS au début de la deuxième
+  colonne — donc exactement à la même position que le texte d'un `<li>`
+  normal, par construction géométrique et non par coïncidence de valeurs à
+  faire correspondre à la main (contrairement à round 23).
+- **CSS de la prévisualisation exposé et éditable** (Réglages > nouvelle
+  section "Aperçu") : les règles de CONTENU de `#ed-preview` (titres,
+  paragraphes, listes/cases à cocher, code, liens, tableaux — tout sauf la
+  règle STRUCTURELLE `position/inset/overflow/padding/police`, restée dans
+  style.css, jamais exposée pour ne pas risquer de casser la mise en page
+  de l'appli) déplacées vers un nouveau fichier `src/preview-style.js`
+  (`PreviewStyle.DEFAULT_CSS`) — SOURCE UNIQUE, plus dupliquée nulle part :
+  `applyPreviewCss()` (app.js, nouveau) injecte `State.settings
+  .previewCustomCss || PreviewStyle.DEFAULT_CSS` dans une balise `<style
+  id="preview-custom-style">` créée au démarrage. Le champ Réglages
+  (`#settings-preview-css`, textarea pleine largeur) est TOUJOURS pré-rempli
+  avec le CSS RÉELLEMENT en effet (personnalisé s'il existe, sinon le
+  défaut) — jamais un champ vide alors qu'un style s'applique déjà, fidèle
+  à la demande "expose le CSS utilisé". Bouton "Réinitialiser au CSS par
+  défaut" (`setPreviewCustomCss('')` — chaîne vide = pas de
+  personnalisation, retombe sur le défaut à l'injection). Persisté en
+  IndexedDB uniquement (`Storage.setMeta`), **volontairement absent de
+  l'export durable `zettelium.ini`** (voir `ini.js`) : du CSS multi-lignes
+  ne survivrait pas au format `clé = valeur`, même raisonnement que
+  `favorites`/`cursors`/`colorTag` (rounds 8/22, jamais exportés non plus).
+- **Marges ajustables en mode sans distraction** (nouveau réglage
+  `State.settings.distractionFreeMarginFactor`, 1 par défaut, stepper 1-5
+  dans Réglages > Éditeur — "un champ où on indique facteur n grossissement
+  de la marge") : `applyEditorTypography()` (app.js) est devenu le POINT
+  D'ENTRÉE UNIQUE pour `--ed-margin-x`/`--ed-margin-y` — il multiplie
+  désormais `editorMarginX`/`editorMarginY` par ce facteur UNIQUEMENT si
+  `Editor.isDistractionFree()` (nouvel export du module, round 24 avait déjà
+  la variable `_distractionFree` mais pas de lecteur externe) renvoie vrai ;
+  sinon facteur 1 (comportement historique inchangé). `editor.js`'s
+  `applyDistractionFree()` (appelée à chaque bascule du mode ainsi qu'à la
+  fermeture de note) appelle `applyEditorTypography()` en fin de fonction —
+  un seul endroit recalcule les marges, jamais dupliqué entre le toggle et
+  les Réglages. Web-only (round 24 l'était déjà pour le mode lui-même),
+  aucun équivalent Android.
+- 6 nouvelles clés i18n × 2 langues (189 au total FR/EN toujours
+  strictement synchronisées : `settings.distractionFreeMarginFactorLabel`/
+  `Desc`, `settings.sectionPreview`, `settings.previewCssDesc`,
+  `settings.previewCssReset`). `make clean && make test` (198/198,
+  inchangé — CSS/DOM uniquement, aucune nouvelle logique pure), cross-check
+  des IDs `el('...')`/`getElementById` contre `template.html` (aucun
+  manquant, hormis `#preview-custom-style` qui est créé par programme via
+  `document.createElement`, jamais présent dans `template.html` — normal,
+  pas une omission). `build.py`/`test/run.js` : `preview-style.js` ajouté à
+  `JS_ORDER` (build), pas ajouté à la suite Node (pure donnée, aucune
+  logique à tester). **Non testé visuellement dans un navigateur réel**
+  (limite habituelle de cet environnement) — en particulier le rendu
+  pixel-parfait de la grille checkbox/puce, le CSS personnalisé réellement
+  appliqué à un aperçu de note ouverte, et le rendu des marges doublées/
+  triplées en mode sans distraction sur un vrai écran.
+
+**Round 26 (2026-07-31, retour utilisateur) — sélecteur de couleur
+personnalisée par dépôt : bouton de validation, aperçu, mémoire de
+session** : trois demandes liées, toutes sur `#repo-color-dlg`
+(repositories.js, round 22/25).
+- **Bouton "Valider" explicite** : cliquer en dehors du sélecteur natif
+  `<input type="color">` pour "valider" n'était pas évident (comportement
+  qui varie selon le navigateur/l'OS, souvent peu visible). L'ancien
+  listener `change` qui appelait `pickColor()` directement (fermant du même
+  coup TOUT le dialogue "Couleur du dépôt") est remplacé par `input`
+  (`onCustomColorInput()`) qui se contente de mémoriser la couleur et de
+  rafraîchir l'aperçu, SANS fermer quoi que ce soit — la validation réelle
+  passe désormais par un bouton dédié `#repo-color-custom-confirm`
+  ("Valider la couleur personnalisée", `.action-row`, masqué tant qu'aucune
+  couleur personnalisée n'a été choisie) qui appelle `pickColor()`
+  lui-même, exactement comme une pastille prédéfinie — le dialogue "Couleur
+  du dépôt" lui-même n'est jamais quitté avant ce clic explicite (demande :
+  "sans quitter le mode couleur du dépôt").
+- **Pastille d'aperçu à côté de "Couleur personnalisée…"**
+  (`#repo-color-custom-preview`, `.repo-color-custom-preview` — même forme
+  que les pastilles fixes mais plus petite et non cliquable, poussée à
+  droite via `margin-left: auto` dans le bouton `.action-row` parent,
+  flex+gap déjà en place). `data-i18n="repo.colorCustom"` déplacé du bouton
+  vers un `<span>` interne — nécessaire dès qu'un bouton a un enfant
+  supplémentaire, `I18n.apply()` fait `textContent = ...` sur l'élément
+  ciblé et aurait sinon effacé la pastille à chaque rafraîchissement de
+  langue.
+- **Mémoire de session de la couleur personnalisée** : nouvelle variable de
+  module `_lastCustomColor` (jamais persistée, jamais touchée par
+  `pickColor()`) — choisir une pastille prédéfinie ENSUITE ne l'efface pas,
+  donc rouvrir le sélecteur (même sur un autre dépôt) retrouve l'aperçu et
+  le bouton "Valider" tels quels (`openColorPicker()` appelle désormais
+  `updateCustomColorPreview()` à l'ouverture). Volontairement PAS préremplie
+  depuis `repo.colorTag` existant (seulement utilisée comme valeur de
+  départ du `<input type="color">` natif lui-même, comme avant) — la
+  distinction "couleur personnalisée mémorisée cette session" vs "couleur
+  actuellement appliquée au dépôt" reste nette, pas de confusion si
+  `repo.colorTag` correspond par coïncidence à une des 8 pastilles fixes.
+- **Bug latent générique retrouvé et corrigé au passage, une 3e fois** :
+  même piège que `.editor-badge` (round 6) et `.icon-btn[hidden]` (round
+  24) — `.action-row { display: flex }` et le nouveau
+  `.repo-color-custom-preview { display: inline-block }` (nécessaire pour
+  que `width`/`height` s'appliquent à un `<span>`) battent tous deux
+  `[hidden] { display: none }` de la feuille UA à spécificité égale.
+  `.action-row[hidden]`/`.repo-color-custom-preview[hidden]` ajoutées de
+  façon générique — au passage, l'ancienne règle ciblée
+  `#ed-context-menu .action-row[hidden]` (round 20) est devenue redondante
+  avec la nouvelle règle générale et a été retirée.
+- 2 nouvelles clés i18n × 2 langues (190 au total FR/EN toujours
+  strictement synchronisées : `repo.colorCustomConfirm`). `make clean &&
+  make test` (198/198, inchangé — DOM/CSS uniquement), cross-check des IDs
+  (aucun manquant, hormis `#preview-custom-style` créé par programme,
+  round 25). **Non testé visuellement dans un navigateur réel** (limite
+  habituelle de cet environnement) — en particulier le rendu réel du
+  sélecteur `<input type="color">` natif du système et l'événement `input`
+  qu'il émet pendant le glissement (peut varier selon navigateur/OS).
+
+**Round 27 (2026-07-31, retour utilisateur) — "Valider" dans le picker de
+couleur personnalisée (pas le menu couleur du dépôt), correction du
+glisser-sélection décalé (impacte aussi la navigation TOC)** : deux retours
+distincts sur des rounds précédents.
+- **Repositionnement du bouton "Valider"** : l'utilisateur a précisé que le
+  round 26 avait placé "Valider" au mauvais endroit — dans la liste du menu
+  "couleur du dépôt" (à côté de "Aucune couleur"), alors qu'il voulait
+  l'avoir "dans le color picker". Techniquement impossible d'aller
+  jusqu'à l'intérieur du sélecteur natif `<input type="color">`
+  lui-même (contrôle du navigateur/de l'OS, pas personnalisable), donc
+  interprété comme : regrouper visuellement le déclencheur du sélecteur, sa
+  pastille d'aperçu et "Valider" en un seul bloc cohérent
+  (`#repo-color-custom-row`), distinct de la liste de pastilles fixes et de
+  "Aucune couleur" au-dessus. La pastille de prévisualisation
+  (`#repo-color-custom-swatch`) devient elle-même le bouton qui ouvre le
+  sélecteur (remplace l'ancien texte "Couleur personnalisée…" + pastille
+  séparée du round 26) — vide, elle affiche une icône goutte
+  (`Icons.droplet()`) en overlay plutôt qu'un rond gris arbitraire, pour ne
+  jamais suggérer qu'une couleur a déjà été choisie. "Valider" reste
+  TOUJOURS visible dans ce groupe (contrairement au round 26 où il
+  apparaissait/disparaissait avec `hidden`) — seul son état `disabled`
+  change, pour que le bloc garde une forme stable.
+- **Glisser-sélection décalé, y compris depuis la table des matières** :
+  root-causé comme la continuation directe des bugs déjà documentés
+  rounds 13/20/20bis (métriques UNIFORMES du vrai textarea vs. lignes de
+  titre agrandies de l'overlay) — round 20bis avait explicitement corrigé
+  le CLIC simple (`correctedOffsetAt`) mais laissé le GLISSER (sélectionner
+  une plage en maintenant le bouton enfoncé) à la résolution native,
+  documenté comme tel dans son propre commentaire ("un glisser/mot/ligne
+  sélectionné est laissé à la résolution native, non corrigé"). C'est
+  exactement le cas signalé ("sélection de textes assez long") — et la
+  mention "table des matières" n'est pas un bug séparé : cliquer une entrée
+  de TOC place juste le curseur par programme (jamais concerné), mais
+  sélectionner ENSUITE manuellement du texte à proximité de titres retombe
+  sur ce même mécanisme de glisser non corrigé. Un seul correctif couvre
+  donc les deux symptômes rapportés.
+  - Nouveaux listeners `mousedown`/`mousemove` sur `#ed-input` : mémorisent
+    le point de départ du glisser (`_dragAnchorClientX/Y`) et détectent un
+    VRAI déplacement souris-bouton-enfoncé (`_didDragSelect`, `e.buttons &
+    1`) — distinction nécessaire pour ne PAS toucher au double/triple-clic
+    (sélection mot/ligne entière, intentionnellement laissée à la
+    résolution native par round 20bis pour ne pas casser son alignement sur
+    les frontières de mot : ces clics ne déplacent jamais la souris entre
+    mousedown et mouseup, donc `_didDragSelect` reste `false`).
+  - Le listener `mouseup` existant (déjà présent pour le clic simple)
+    gagne une branche `else if (_didDragSelect ...)` : corrige les DEUX
+    extrémités de la sélection via `correctedOffsetAt` (l'ancre mémorisée
+    ET le point de relâchement), reconstruit l'intervalle avec
+    `Math.min`/`Math.max` (l'ancre peut être avant OU après le point final
+    selon le sens du glisser) et préserve le SENS de la sélection
+    (`setSelectionRange(lo, hi, 'forward'|'backward')`, pour que
+    Maj+flèche continue d'étendre dans la bonne direction ensuite). Appelle
+    aussi `updateSelectionHighlight()` (round 13) en plus de
+    `updateCaretIndicator()` (round 20) — contrairement au clic simple, la
+    sélection elle-même doit être repeinte, pas seulement le curseur.
+- `make clean && make test` (198/198, inchangé — corrections DOM/CSS/
+  interaction réelles, pas de nouvelle logique pure), cross-check des IDs
+  (aucun manquant), 191 clés i18n FR/EN toujours strictement synchronisées
+  (+1 : `repo.colorCustomPickTooltip`). **Non vérifié en conditions
+  réelles** (souris physique) — même limite méthodologique que documentée
+  aux rounds 20/20bis : un clic/glisser SIMULÉ par script
+  (`setSelectionRange` direct ou `MouseEvent` synthétique) ne peut pas
+  révéler ni valider ce genre de correctif, seule une mesure par
+  protocole d'entrée bas niveau (CDP `Input.dispatchMouseEvent`, comme
+  utilisé aux rounds 20/20bis) le pourrait — non disponible pour vérifier
+  ce round précis, à confirmer par l'utilisateur avec un glisser-sélection
+  réel sur une note à plusieurs titres.
+
+**Round 28 (2026-07-31, retour utilisateur) — navigation TOC toujours
+décalée (défilement, pas le curseur lui-même)** : la sélection (round 27)
+allait mieux, mais la TOC restait décalée — "il faut cliquer deux fois pour
+voir le curseur qui arrive au bon endroit, et parfois il faut aussi
+scroller pour le voir", pire encore en mode `<dialog>` (non épinglé).
+- **Cause racine identifiée en relisant le round 20ter** : `pixelTopForOffset()`
+  (utilisée par la navigation TOC, "Aller à l'ID", et la recherche en note —
+  toutes les fonctions qui doivent FAIRE DÉFILER jusqu'à un offset donné)
+  construisait encore un `Range` collé directement via `domPositionForOffset`
+  + `.collapse(true)` — exactement la technique dont le round 20ter avait
+  pourtant déjà démontré, empiriquement, qu'elle renvoie un rect
+  systématiquement VIDE (`getClientRects()` longueur 0 ET
+  `getBoundingClientRect()` tout à zéro dans Chromium) à certaines positions
+  de frontière — en particulier en tout DÉBUT de ligne, exactement la
+  position d'une entrée de TOC (`entry.charOffset` pointe le premier
+  caractère du titre). Round 20ter n'avait corrigé QUE `updateCaretIndicator()`
+  avec cette découverte (nouvelle fonction `lineRangeForOffset`), en
+  oubliant `pixelTopForOffset()` qui utilisait la même technique buguée sans
+  qu'on y repense à ce moment-là.
+- **Mécanique du bug** : un rect à zéro donnait `ta().scrollTop + (0 -
+  wrapRect.top)`, une valeur sans rapport avec la cible réelle (souvent
+  négative) — ramenée à 0 par le `Math.max(0, ...)` de `navigateToToc()`,
+  d'où un défilement vers le tout DÉBUT du document au lieu du titre visé.
+  Le CURSEUR lui-même (`input.setSelectionRange(entry.charOffset, ...)`)
+  n'a jamais été affecté par ce bug précis — `entry.charOffset` est passé
+  tel quel, indépendamment de cette fonction — d'où le symptôme exact
+  rapporté : le curseur ATTERRIT au bon endroit (texte correctement
+  sélectionné une fois qu'on le voit), mais la vue ne défile pas jusqu'à
+  lui, le laissant hors champ jusqu'à ce qu'une action ultérieure (clic,
+  scroll manuel) le révèle par coïncidence.
+- **Corrigé** : `pixelTopForOffset()` réutilise maintenant `lineRangeForOffset()`
+  (la fonction robuste du round 20ter, déjà éprouvée pour le caret) au lieu
+  de reconstruire son propre `Range` naïf — même garde `!rect.width &&
+  !rect.height` en repli. Bénéfice collatéral, pas seulement la TOC : les
+  3 AUTRES appelants de `pixelTopForOffset()` (`goToId`/"Aller à l'ID",
+  `selectSearchMatch`/recherche en note, et la restauration de la position
+  du curseur à l'ouverture d'une note) profitent automatiquement du même
+  correctif — un seul point de mesure, jamais dupliqué.
+- Pas de différence de fond entre le mode `<dialog>` et le panneau latéral
+  épinglé : les deux appellent la même `navigateToToc()`/`pixelTopForOffset()`,
+  donc la même cause explique les deux symptômes signalés — l'impression que
+  le mode `<dialog>` "n'arrivait jamais directement au bon endroit" tenait
+  vraisemblablement à une variance de timing incidente (fermeture de la
+  modale juste avant la mesure), pas à un bug structurellement distinct.
+- `make clean && make test` (198/198, inchangé — correction d'une fonction
+  DOM pure existante, pas de nouvelle logique testable en Node). **Non
+  vérifié en conditions réelles** (souris/clavier physiques) — même limite
+  méthodologique que les rounds 20/20bis/27 (un défilement/curseur simulé
+  par script ne peut pas révéler ce type de bug de mesure DOM) ; à confirmer
+  par l'utilisateur, en particulier la navigation TOC en mode `<dialog>`
+  ET en panneau latéral sur une note à plusieurs titres.
+
+**Round 29 (2026-07-31, retour utilisateur) — glisser-sélection encore
+décalé sur un texte long ("il faut sélectionner ~4cm plus haut pour
+atteindre le bon texte")** : la TOC (round 28) était corrigée, mais la
+sélection au glisser (round 27) restait décalée spécifiquement sur de
+LONGS glissers, avec un décalage qui grandit avec la distance — signal
+fort d'une deuxième cause distincte du problème "métriques uniformes du
+textarea vs. titres agrandis" déjà traité.
+- **Cause racine** : round 27 mémorisait les COORDONNÉES ÉCRAN
+  (`_dragAnchorClientX/Y`) du point de départ au `mousedown`, pour les
+  réinterpréter plus tard via `correctedOffsetAt` au `mouseup`. Un glisser
+  assez long pour approcher le bord de la zone visible déclenche
+  l'auto-scroll natif du `<textarea>` PENDANT le glisser (comportement du
+  navigateur, indépendant de ce code) — une fois ce défilement survenu, les
+  coordonnées écran mémorisées à l'origine ne pointent plus vers le MÊME
+  texte : le contenu a bougé sous ce point fixe de l'écran. Réinterpréter
+  ces coordonnées au `mouseup` (donc après le défilement) désignait alors
+  un texte différent de celui réellement visé au moment du clic — d'où un
+  décalage qui grandit avec la distance du glisser (plus le glisser est
+  long, plus l'auto-scroll cumulé est important).
+- **Corrigé** : l'ancre du glisser (`_dragAnchorOffset`, remplace
+  `_dragAnchorClientX/Y`) est désormais résolue en OFFSET DE TEXTE
+  IMMÉDIATEMENT au `mousedown` (avant tout défilement possible), via
+  `correctedOffsetAt` appelé à cet instant précis — un offset de texte,
+  contrairement à des coordonnées écran, reste valide quel que soit le
+  défilement qui survient ensuite. Seul le point de RELÂCHEMENT
+  (`mouseup`) continue d'être résolu "en direct" à cet instant-là (il
+  reflète déjà l'état courant, post-défilement, du contenu — pas besoin
+  d'être mémorisé plus tôt).
+- `make clean && make test` (198/198, inchangé — correction d'interaction
+  DOM réelle, pas de nouvelle logique pure testable en Node). **Non vérifié
+  en conditions réelles** (souris physique, auto-scroll natif pendant un
+  glisser) — même limite méthodologique que les rounds 20/20bis/27/28 (un
+  glisser simulé par script ne peut pas révéler ni valider ce type de bug
+  de timing écran/défilement) ; à confirmer par l'utilisateur avec un
+  glisser réel dépassant la hauteur de la zone visible.
+
+**Round 30 (2026-07-31, retour utilisateur : "toujours décalé, du même
+espace qu'auparavant") — cause réelle enfin isolée par reproduction CDP,
+`correctedOffsetAt` rejetait les lignes vides** : le round 29 n'avait eu
+AUCUN effet mesurable — signal fort que l'hypothèse "timing de l'ancre
+pendant l'auto-scroll" était fausse ou non pertinente. Cette fois,
+root-causé par une vraie reproduction automatisée (headless Brave + CDP
+`Input.dispatchMouseEvent`, pas de simple simulation programmatique — voir
+méthode ci-dessous) plutôt que par déduction pure.
+- **Méthode** : note de test factice (40 chapitres, titres + commentaires +
+  paragraphes + lignes vides, ouverte via `Editor.open()` avec un
+  `fileHandle`/dépôt factices, même technique que les rounds 19bis/20/20bis),
+  glissers RÉELS simulés au niveau du protocole d'entrée (pas
+  `setSelectionRange` ni `MouseEvent` synthétique), comparés à une mesure de
+  référence indépendante. Premiers essais faussés par la mesure de référence
+  elle-même (évaluer du JS pendant que le bouton de souris était encore
+  enfoncé perturbait le geste natif en cours ; mesurer une position
+  pixel-précise via un `Range` sur un DÉBUT de nœud reproduisait le piège
+  déjà documenté round 20ter) — corrigés en composant la référence
+  APRÈS relâchement complet du bouton, et en calculant les offsets attendus
+  directement depuis le texte source connu plutôt que par mesure d'écran.
+- **Cause réelle** : `correctedOffsetAt()` rejetait (`return null`) tout
+  point où `caretRangeFromPoint` renvoie un `Range` dont `startContainer`
+  n'est PAS un nœud texte — ce qui arrive systématiquement quand le point
+  cliqué/relâché tombe sur une LIGNE VIDE (`<span class="hl-line"></span>`
+  sans aucun texte à l'intérieur, cf. `lineElementForOffset`/round 20ter).
+  Les lignes vides ne sont pas un cas rare : elles séparent couramment les
+  paragraphes (voir la capture d'écran de l'utilisateur — une ligne vide
+  entre le titre "== Chapitre 28 ==" et "% 30 brumaire ?"), donc un glisser
+  un tant soit peu long a de très fortes chances d'en traverser au moins
+  une, en particulier à son point de RELÂCHEMENT (`mouseup`) qui détermine
+  la fin de la sélection. Quand `correctedOffsetAt` renvoie `null`, le
+  `mouseup` handler (round 27/29) ne fait RIEN (`if (focusOffset !== null)
+  {...}`) — la sélection retombe intégralement sur la résolution NATIVE non
+  corrigée, exactement le bug d'origine (métriques uniformes du textarea),
+  d'où l'impression que "rien n'a changé" malgré les rounds 27-29.
+- **Corrigé** : nouvelle fonction `globalOffsetOfLineStart(lineSpan)`
+  (inverse de `lineElementForOffset` — élément de ligne -> offset global,
+  en comptant les `\n` de `ta().value` jusqu'à l'index de cette ligne parmi
+  ses sœurs `.hl-line`). `correctedOffsetAt()` distingue maintenant les deux
+  cas au lieu de rejeter le second : nœud texte -> `offsetForDomPosition`
+  (inchangé) ; `<span class="hl-line">` (ligne vide) -> `globalOffsetOfLineStart`
+  (nouveau) — la seule position possible sur une ligne vide étant son
+  propre début. **Validé de façon déterministe** (pas seulement "ça a l'air
+  mieux") : un glisser réel se terminant EXACTEMENT sur une ligne vide dont
+  l'offset est connu à l'avance (calculé depuis le texte source, pas mesuré
+  à l'écran) atterrit maintenant pile sur cet offset ; un glisser dans les
+  deux sens avec des marges confortables (loin des bords, pour exclure
+  l'auto-scroll comme variable) donne un delta de 0 caractère par rapport à
+  une mesure de référence indépendante utilisant la même logique corrigée.
+- `make clean && make test` (198/198, inchangé — correction d'une fonction
+  DOM pure existante, pas de nouvelle logique testable en Node). **Vérifié
+  par reproduction automatisée cette fois** (headless Brave + CDP, glissers
+  réels, comparaison à une référence indépendante calculée depuis le texte
+  source) — contrairement aux rounds 27/28/29 qui n'avaient pu être vérifiés
+  qu'en conditions réelles par l'utilisateur. **Non vérifié avec une souris
+  physique** — la reproduction CDP couvre le mécanisme de résolution
+  lui-même, pas l'expérience utilisateur complète (latence perçue, gestes
+  tactiles, etc.) ; à confirmer par l'utilisateur.
+
+**Round 31 (2026-07-31, retour utilisateur : "la sélection finale est
+correcte... mais pendant qu'on sélectionne c'est toujours décalé. C'est
+juste visuel") — aperçu EN DIRECT du glisser, pas seulement le résultat
+final** : confirmation que le round 30 avait bien corrigé le fond du
+problème (résultat final exact), mais round 27-30 n'avaient jamais corrigé
+que `ta().selectionStart/End` AU RELÂCHEMENT (`mouseup`) — pendant le
+glisser lui-même, le surlignage affiché suit le suivi NATIF (non corrigé)
+de la sélection en cours, qui continue de diverger de la position visuelle
+réelle sur une note à plusieurs titres, jusqu'à "sauter" à la bonne place
+seulement au relâchement.
+- **Corrigé** : `updateSelectionHighlight()` accepte maintenant un
+  intervalle explicite optionnel (`overrideStart`/`overrideEnd`, défaut :
+  lit `ta().selectionStart/End` comme avant, compatible avec tous les
+  appels existants) — permet de peindre un APERÇU corrigé sans toucher à la
+  sélection native elle-même. Le listener `mousemove` (déjà posé au round
+  27 pour détecter un glisser) calcule maintenant, à chaque déplacement
+  (throttlé à ~60fps via `performance.now()` — `correctedOffsetAt` fait un
+  hit-test DOM complet, coûteux à répéter à chaque `mousemove`), le focus
+  corrigé du point courant et repeint `updateSelectionHighlight(lo, hi)`
+  avec l'ancre (déjà résolue au `mousedown`, round 29) et ce focus. **Ne
+  touche jamais `ta().selectionStart/End` pendant le glisser** —
+  volontairement laissée à son propre suivi natif jusqu'au `mouseup` (qui
+  la remplace pour de bon, logique déjà en place) : lui écrire directement
+  pendant un glisser natif en cours risquerait d'interférer avec l'ancre
+  interne que le navigateur utilise pour continuer à étendre SA PROPRE
+  sélection à chaque prochain mouvement.
+- **Effet de bord corrigé au passage** : le listener `selectionchange`
+  (déclenché par CE MÊME suivi natif non corrigé pendant le glisser)
+  aurait sinon réécrasé l'aperçu corrigé entre deux `mousemove`, provoquant
+  un clignotement entre la bonne et la mauvaise position — ce listener
+  saute maintenant son propre appel à `updateSelectionHighlight()` tant
+  qu'un glisser est activement en cours (`_dragAnchorOffset !== null &&
+  _didDragSelect`), laissant le `mousemove` throttlé être la SEULE source
+  de vérité visuelle pendant le geste.
+- **Vérifié par reproduction automatisée** (headless Brave + CDP, même
+  méthodologie que round 30, affinée pour ne PAS interférer avec le
+  glisser : lecture directe des propriétés du `Range` déjà peint par
+  `CSS.highlights.get('ed-selection')`, sans hit-test ni bascule de
+  `pointer-events` pendant que le bouton est encore enfoncé, contrairement
+  aux premiers essais du round 30 qui avaient involontairement perturbé
+  leurs propres mesures de cette façon) : un glisser réel, échantillonné à
+  mi-parcours PENDANT qu'il est encore maintenu, montre un aperçu
+  (`CSS.highlights`) exactement aligné sur une mesure de référence
+  indépendante (delta 0), alors que la sélection native seule, au même
+  instant, en divergeait déjà légèrement — confirmant que l'aperçu corrigé
+  est bien actif en direct, pas seulement au relâchement.
+- `make clean && make test` (198/198, inchangé — correction DOM/interaction
+  réelle, pas de nouvelle logique pure testable en Node). **Non vérifié
+  avec une souris physique** — même limite que le round 30.
 
 ## Ne jamais faire
 

@@ -69,7 +69,7 @@ const Txt2TagsRender = (() => {
         return `<pre class="t2t-code">${escapeHtml(block.lines.join('\n'))}</pre>`;
       case 'ListNode': {
         const tag = block.ordered ? 'ol' : 'ul';
-        return `<${tag}>${block.items.map(it => renderListItem(it, opts)).join('')}</${tag}>`;
+        return `<${tag}>${block.items.map(it => renderListItem(it, block, opts)).join('')}</${tag}>`;
       }
       case 'DefinitionList':
         return `<dl>${block.items.map(it =>
@@ -81,8 +81,35 @@ const Txt2TagsRender = (() => {
     }
   }
 
-  function renderListItem(item, opts) {
+  // Cases à cocher (`- [ ] tâche`, convention Zettelium — voir
+  // txt2tags/checklist.js) : `null` si `item` n'en est pas une (liste
+  // ordonnée, ou contenu ne commençant pas par ce marqueur). Dérivé
+  // directement de l'AST, PAS du texte source — contrairement à l'indice
+  // `opts.checklistIndices` (nécessaire pour écrire dans le fichier au clic),
+  // l'état coché/décoché affiché n'a besoin d'aucune position, il est déjà
+  // porté par le texte parsé.
+  function checkboxOf(list, item) {
+    if (list.ordered) return null;
+    const first = item.inlines[0];
+    if (!first || first.type !== 'Text') return null;
+    const parsed = Txt2TagsChecklist.parseCheckbox(first.text);
+    if (!parsed) return null;
+    const labelInlines = parsed.label === ''
+      ? item.inlines.slice(1)
+      : [Text(parsed.label), ...item.inlines.slice(1)];
+    return { checked: parsed.checked, labelInlines };
+  }
+
+  function renderListItem(item, list, opts) {
     const childHtml = item.children.map(b => renderBlock(b, opts)).join('');
+    const checkbox = checkboxOf(list, item);
+    if (checkbox) {
+      const idx = opts.checklistIndices ? opts.checklistIndices.get(item) : undefined;
+      const idxAttr = idx !== undefined ? ` data-checkbox-index="${idx}"` : '';
+      const checkedAttr = checkbox.checked ? ' checked' : '';
+      return `<li class="t2t-checklist-item"><input type="checkbox" class="t2t-checkbox"${checkedAttr}${idxAttr}>` +
+        `<span>${renderInlines(checkbox.labelInlines, opts)}</span>${childHtml}</li>`;
+    }
     return `<li>${renderInlines(item.inlines, opts)}${childHtml}</li>`;
   }
 

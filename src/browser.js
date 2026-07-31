@@ -20,6 +20,14 @@ const Browser = (() => {
   let _searchMode = 'name'; // 'name' | 'content' | 'tag'
   let _searchDebounce = null;
 
+  // Portée de la recherche (round 27a Android) — 'repo' (dépôt actif
+  // seulement, comportement historique) | 'all' (tous les dépôts déjà
+  // ajoutés). Variable de session pure, comme `_searchMode` : jamais
+  // persistée, retombe sur 'repo' à chaque rechargement — même choix
+  // qu'Android (`SearchViewModel.scope`, `mutableStateOf`, pas dans
+  // `AppSettings`).
+  let _searchScope = 'repo';
+
   // NoteFile ciblé par le menu d'actions (Renommer/Déplacer/Supprimer) —
   // équivalent web du clic long d'Android (`fileForActions`/`fileToRename`/
   // `fileToMove`/`fileToDelete`, BrowserScreen.kt) : pas de geste long-press
@@ -112,18 +120,43 @@ const Browser = (() => {
     el('browser-title').textContent = State.dirStack.map(s => s.name).join(' / ');
   }
 
+  // Teinte l'en-tête du navigateur avec la couleur d'identification du
+  // dépôt actif (round 22) — voir style.css `.repo-tinted` pour le détail
+  // de ce que la classe couvre exactement (jamais le menu déroulant "⋮").
+  function applyRepoColorTint() {
+    const repo = activeRepository();
+    const header = el('browser-header');
+    if (repo && repo.colorTag) {
+      header.style.setProperty('--repo-tint-bg', repo.colorTag);
+      header.style.setProperty('--repo-tint-fg', readableTextColor(repo.colorTag));
+      header.classList.add('repo-tinted');
+    } else {
+      header.classList.remove('repo-tinted');
+    }
+  }
+
   // `searchTerm` : passé seulement pour un résultat de recherche de CONTENU
   // (voir render() plus bas) — au clic, la note s'ouvre directement sur la
   // première occurrence du terme trouvé plutôt que de laisser l'utilisateur
   // la rechercher à la main dans le texte.
+  // `file.repositoryId` n'est porté QUE par les entrées de l'Index (résultats
+  // de recherche, voir index.js `buildEntry`) — les lignes de navigation
+  // normale (`State.repoFiles`, `FSA.listChildren`) n'en ont pas, d'où le
+  // repli sur le dépôt actif.
   function renderFileRow(file, searchTerm) {
     const item = document.createElement('div');
     item.className = 'file-item';
+    const repo = activeRepository();
+    const fileRepositoryId = file.repositoryId || (repo && repo.id);
     // Surligne la note actuellement ouverte dans le panneau épinglé
-    // (round 19) — sans effet hors de ce mode (Editor.currentPath() est
-    // toujours `null` tant qu'aucune note n'est ouverte à côté du
-    // navigateur, ce qui n'arrive jamais hors mode épinglé).
-    if (State.settings.fileListSidebarMode && Editor.currentPath() === file.path) {
+    // (round 19) — sans effet hors de ce mode. `fileRepositoryId ===
+    // State.activeRepositoryId` évite une collision de chemin entre deux
+    // dépôts différents en recherche multi-dépôts (round 27a) : après un
+    // clic cross-dépôt, `State.activeRepositoryId` a déjà basculé sur le
+    // dépôt de la note ouverte (voir plus bas), donc cette comparaison reste
+    // correcte même dans ce mode.
+    if (State.settings.fileListSidebarMode && fileRepositoryId === State.activeRepositoryId
+        && Editor.currentPath() === file.path) {
       item.classList.add('file-item-active');
     }
 
@@ -132,28 +165,62 @@ const Browser = (() => {
     name.textContent = file.name;
     item.appendChild(name);
 
+    // Étoile pleine si favorite (round 28 Android) — indicateur seul, pas
+    // cliquable (la bascule se fait uniquement depuis le menu ⋮ de la note,
+    // demande utilisateur explicite : "clic long... comme pour renommer").
+    if (fileRepositoryId && isFavorite(fileRepositoryId, file.path)) {
+      const star = document.createElement('span');
+      star.className = 'file-item-favorite';
+      star.innerHTML = Icons.star(14, true);
+      star.title = I18n.t('browser.favoriteIndicator');
+      item.appendChild(star);
+    }
+
     const meta = document.createElement('span');
     meta.className = 'file-item-meta';
     const dateStr = new Date(file.lastModified).toLocaleString();
     // Search results can come from a subfolder (path !== name) — show it,
     // since two notes in different folders can share the same bare name.
-    meta.textContent = (file.path && file.path !== file.name) ? `${file.path} — ${dateStr}` : dateStr;
+    // En recherche multi-dépôts (round 27a), préfixe aussi le nom du dépôt
+    // — même raison, deux dépôts peuvent avoir un fichier de même nom/chemin
+    // — même principe que le `repositoryNames[note.repositoryId]` d'Android.
+    const repoNamePart = (_searchScope === 'all' && file.repositoryId)
+      ? (State.repositories.find(r => r.id === file.repositoryId)?.name) : null;
+    const pathPart = (file.path && file.path !== file.name) ? file.path : null;
+    const prefix = [repoNamePart, pathPart].filter(Boolean).join(' / ');
+    meta.textContent = prefix ? `${prefix} — ${dateStr}` : dateStr;
     item.appendChild(meta);
 
-    const actionsBtn = document.createElement('button');
-    actionsBtn.className = 'icon-btn file-item-actions-btn';
-    actionsBtn.title = I18n.t('browser.actionsTooltip');
-    actionsBtn.textContent = '⋮';
-    actionsBtn.addEventListener('click', e => {
-      e.stopPropagation(); // ne pas déclencher l'ouverture de la note
-      openNoteActions(file);
-    });
-    item.appendChild(actionsBtn);
+    // Menu d'actions (Renommer/Déplacer/Dupliquer/Supprimer) : pas proposé
+    // sur un résultat de recherche multi-dépôts — même choix qu'Android,
+    // dont SearchScreen n'a aucun menu d'actions par ligne (contrairement à
+    // BrowserScreen) ; toutes ces actions supposent ici le dépôt ACTIF, ce
+    // qui serait incorrect pour une note d'un AUTRE dépôt.
+    if (_searchScope !== 'all') {
+      const actionsBtn = document.createElement('button');
+      actionsBtn.className = 'icon-btn file-item-actions-btn';
+      actionsBtn.title = I18n.t('browser.actionsTooltip');
+      actionsBtn.textContent = '⋮';
+      actionsBtn.addEventListener('click', e => {
+        e.stopPropagation(); // ne pas déclencher l'ouverture de la note
+        openNoteActions(file);
+      });
+      item.appendChild(actionsBtn);
+    }
 
     // `openOther` (pas `open` direct) : avec le panneau épinglé (round 19),
     // cette ligne peut rester cliquable pendant qu'une AUTRE note, déjà
-    // ouverte dans le panneau, a des modifications non enregistrées.
-    item.addEventListener('click', () => Editor.openOther(file, searchTerm ? { searchTerm } : undefined));
+    // ouverte dans le panneau, a des modifications non enregistrées. Un
+    // résultat d'un AUTRE dépôt que l'actif (round 27a) bascule d'abord le
+    // dépôt actif — mêmes garanties ensuite (Editor.open lit
+    // `activeRepository()` en interne).
+    item.addEventListener('click', async () => {
+      if (file.repositoryId && file.repositoryId !== State.activeRepositoryId) {
+        State.activeRepositoryId = file.repositoryId;
+        await scanActiveRepo();
+      }
+      Editor.openOther(file, searchTerm ? { searchTerm } : undefined);
+    });
     return item;
   }
 
@@ -168,11 +235,36 @@ const Browser = (() => {
   function openNoteActions(file) {
     _actionsFile = file;
     el('note-actions-title').textContent = file.name;
+    updateFavoriteActionLabel();
     el('note-actions-dlg').showModal();
   }
 
   function closeNoteActions() {
     el('note-actions-dlg').close();
+  }
+
+  // Libellé/icône de "Ajouter aux favoris"/"Retirer des favoris" — dépend de
+  // _actionsFile (la note ciblée par le menu), pas juste de la langue, donc
+  // pas dans refreshI18nLabels() ; rappelé à l'ouverture du menu ET juste
+  // après la bascule (le dialogue reste ouvert, round 28 Android : "seule
+  // action de ce menu qui s'applique en un seul tap sans ouvrir de dialogue
+  // supplémentaire").
+  function updateFavoriteActionLabel() {
+    const repo = activeRepository();
+    const fav = repo && _actionsFile && isFavorite(repo.id, _actionsFile.path);
+    el('note-actions-favorite').innerHTML =
+      `${Icons.star(18, fav)} ${I18n.t(fav ? 'browser.removeFavorite' : 'browser.addFavorite')}`;
+  }
+
+  // Bascule d'un seul tap (pas de dialogue supplémentaire), en tête du menu
+  // — demande utilisateur explicite ("clic long... comme pour renommer").
+  async function toggleFavoriteFromActions() {
+    const repo = activeRepository();
+    const file = _actionsFile;
+    if (!repo || !file) return;
+    await toggleFavorite(repo.id, file.path);
+    updateFavoriteActionLabel();
+    render(); // rafraîchit l'étoile dans la liste
   }
 
   function openRenameFromActions() {
@@ -208,6 +300,9 @@ const Browser = (() => {
       alert(I18n.t('common.renameFailed', { error: e.message }));
       return;
     }
+    const slash = file.path.lastIndexOf('/');
+    const folderPrefix = slash >= 0 ? file.path.slice(0, slash + 1) : '';
+    await rekeyFavorite(repo.id, file.path, repo.id, folderPrefix + newName);
     try {
       await Index.indexRepository(repo, { forceFull: true });
     } catch (e) {
@@ -274,6 +369,7 @@ const Browser = (() => {
       alert(I18n.t('browser.deleteFailed', { error: e.message }));
       return;
     }
+    await removeFavorite(repo.id, file.path);
     // Room = projection reconstructible : purge la note (et ses backlinks)
     // par une réindexation complète, pas une suppression ciblée par chemin
     // dans chaque structure — même raisonnement qu'Android (round 10).
@@ -409,6 +505,7 @@ const Browser = (() => {
     } catch (e) {
       alert(I18n.t('browser.movePartialFailure', { error: e.message }));
     }
+    await rekeyFavorite(sourceRepo.id, file.path, destRepo.id, destEntry.path + file.name);
 
     try { await Index.indexRepository(sourceRepo, { forceFull: true }); } catch (e) { console.error(e); }
     if (destRepo.id !== sourceRepo.id) {
@@ -455,13 +552,16 @@ const Browser = (() => {
   function render() {
     const repo = activeRepository();
     updateBreadcrumb();
+    applyRepoColorTint();
     syncRepoOptionsUI();
     updateSortButton();
+    updateSearchScopeButton();
 
     const list = el('browser-list');
     list.innerHTML = '';
 
     const query = el('browser-search-input').value.trim();
+    el('browser-search-clear-btn').hidden = !query;
     if (!query) {
       renderBrowseRows(list);
       return;
@@ -470,10 +570,10 @@ const Browser = (() => {
     // Searching reaches into the recursive index (Index.entries), so it
     // surfaces notes from every subfolder regardless of which one is
     // currently being browsed — same as Android's search screen, never
-    // scoped to the current folder.
-    const results = repo
-      ? sortFiles(Index.entries(repo.id).filter(e => matchesQuery(e, query.toLowerCase())))
-      : [];
+    // scoped to the current folder. En portée 'all' (round 27a), interroge
+    // tous les dépôts déjà indexés au lieu du seul dépôt actif.
+    const pool = (_searchScope === 'all') ? Index.entriesAllRepos() : (repo ? Index.entries(repo.id) : []);
+    const results = sortFiles(pool.filter(e => matchesQuery(e, query.toLowerCase())));
     el('browser-empty-hint').hidden = results.length > 0;
     el('browser-empty-hint').textContent = I18n.t('browser.emptyHintNoResults');
     const jumpTerm = _searchMode === 'content' ? query : undefined;
@@ -513,8 +613,21 @@ const Browser = (() => {
   }
 
   async function openActive() {
+    _searchScope = 'repo'; // toujours limité au dépôt actif à l'entrée d'un dépôt (round 27a)
     await rescan();
     reindexActive(); // not awaited — see reindexActive() comment
+  }
+
+  // Recherche multi-dépôts (round 27a) : contrairement à `reindexActive`
+  // (un seul dépôt, déjà lancé à chaque ouverture du navigateur), les
+  // AUTRES dépôts ne sont indexés qu'à la demande, la première fois que la
+  // portée "Tous les dépôts" est activée — inutile d'indexer en arrière-plan
+  // des dépôts que l'utilisateur ne cherche peut-être jamais globalement.
+  // Pas attendue par l'appelant, même compromis "résultats partiels qui se
+  // complètent" que `reindexActive`.
+  async function reindexAllRepos() {
+    await Promise.all(State.repositories.map(r => Index.indexRepository(r).catch(e => console.error(e))));
+    render();
   }
 
   // --- Créer une nouvelle note -------------------------------------------------
@@ -650,6 +763,26 @@ const Browser = (() => {
     render();
   }
 
+  // Bascule "Ce dépôt" / "Tous les dépôts" (round 27a) — visible seulement
+  // s'il y a plus d'un dépôt (rien à choisir sinon, même condition
+  // qu'Android : `viewModel.repositoryNames.size > 1`).
+  function updateSearchScopeButton() {
+    const btn = el('browser-search-scope-btn');
+    btn.hidden = State.repositories.length <= 1;
+    if (btn.hidden) return;
+    if (!btn.firstChild) btn.innerHTML = Icons.globe();
+    btn.classList.toggle('active', _searchScope === 'all');
+    btn.title = _searchScope === 'all'
+      ? I18n.t('browser.searchScopeAllTooltip')
+      : I18n.t('browser.searchScopeRepoTooltip');
+  }
+
+  function toggleSearchScope() {
+    _searchScope = _searchScope === 'all' ? 'repo' : 'all';
+    if (_searchScope === 'all') reindexAllRepos(); // not awaited — see reindexAllRepos() comment
+    render();
+  }
+
   function syncRepoOptionsUI() {
     const repo = activeRepository();
     el('repo-options-include-extension').checked = !!(repo && repo.includeExtensionInLinks);
@@ -780,6 +913,7 @@ const Browser = (() => {
     el('browser-back-btn').addEventListener('click', backOrUp);
     el('browser-refresh-btn').addEventListener('click', async () => { await rescan(); reindexActive(); });
     el('browser-sort-btn').addEventListener('click', toggleSort);
+    el('browser-search-scope-btn').addEventListener('click', toggleSearchScope);
 
     el('browser-menu-btn').addEventListener('click', toggleBrowserMenu);
     el('browser-menu-repo-options').addEventListener('click', runBrowserMenuAction(openRepoOptions));
@@ -799,6 +933,7 @@ const Browser = (() => {
     el('new-note-input').addEventListener('keydown', e => { if (e.key === 'Enter') confirmNewNote(); });
 
     el('note-actions-close').addEventListener('click', closeNoteActions);
+    el('note-actions-favorite').addEventListener('click', toggleFavoriteFromActions);
     el('note-actions-rename').addEventListener('click', openRenameFromActions);
     el('note-actions-move').addEventListener('click', () => { const f = _actionsFile; closeNoteActions(); if (f) openMoveDialog(f); });
     el('note-actions-duplicate').addEventListener('click', duplicateFromActions);
@@ -818,6 +953,11 @@ const Browser = (() => {
     });
 
     el('browser-search-input').addEventListener('input', scheduleRender);
+    el('browser-search-clear-btn').addEventListener('click', () => {
+      el('browser-search-input').value = '';
+      el('browser-search-input').focus();
+      render(); // immédiat, pas de debounce à attendre pour un clic explicite
+    });
     for (const btn of document.querySelectorAll('#browser-search-mode button')) {
       btn.addEventListener('click', () => {
         _searchMode = btn.dataset.mode;

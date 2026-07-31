@@ -110,6 +110,22 @@
       </span>
       <span class="switch"><input type="checkbox" id="settings-heading-sizes"><span class="switch-track"></span></span>
     </label>
+    <label class="settings-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.distractionFreeMarginFactorLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.distractionFreeMarginFactorDesc"></span>
+      </span>
+      <span class="settings-stepper">
+        <button id="settings-distraction-margin-dec" type="button">−</button>
+        <input type="number" id="settings-distraction-margin-value" class="settings-stepper-value" step="1">
+        <button id="settings-distraction-margin-inc" type="button">+</button>
+      </span>
+    </label>
+
+    <p class="settings-section-title" data-i18n="settings.sectionPreview"></p>
+    <p class="hint" data-i18n="settings.previewCssDesc"></p>
+    <textarea id="settings-preview-css" class="settings-css-textarea" spellcheck="false" autocomplete="off"></textarea>
+    <button id="settings-preview-css-reset" class="settings-full-width-btn" data-i18n="settings.previewCssReset"></button>
 
     <p class="settings-section-title" data-i18n="settings.sectionLanguage"></p>
     <div class="settings-radio-group" id="settings-language">
@@ -213,7 +229,9 @@
       <button data-mode="tag" data-i18n="browser.searchTag"></button>
     </div>
     <input type="text" id="browser-search-input" data-i18n-placeholder="browser.searchPlaceholderName" autocomplete="off">
+    <button id="browser-search-clear-btn" data-i18n-title="browser.clearSearchTooltip" class="icon-btn" hidden>✕</button>
     <button id="browser-tags-btn" data-i18n-title="browser.tagsTooltip" class="icon-btn" hidden></button>
+    <button id="browser-search-scope-btn" class="icon-btn" hidden></button>
     <button id="browser-sort-btn" class="icon-btn"></button>
   </div>
   <p id="browser-empty-hint" class="hint" data-i18n="browser.emptyHintNoFiles" hidden></p>
@@ -274,6 +292,7 @@
         <div id="editor-menu-wrap">
           <button id="editor-menu-btn" data-i18n-title="editor.moreTooltip">⋮</button>
           <div id="editor-menu" hidden>
+            <button id="editor-menu-distraction-free" class="icon-label-btn"></button>
             <button id="editor-menu-search" class="icon-label-btn"></button>
             <button id="editor-menu-insert-id" class="icon-label-btn"></button>
             <button id="editor-menu-insert-link" class="icon-label-btn"></button>
@@ -295,6 +314,11 @@
     </div>
     <div id="ed-body">
       <div id="ed-main">
+        <!-- Bouton flottant de sortie du mode sans distraction (round 24) —
+             seul moyen de désactiver le mode une fois #ed-header masqué (le
+             bouton "⋮" qui héberge l'action d'origine disparaît avec lui).
+             Échap fait aussi l'affaire, ce bouton reste pour la découvrabilité. -->
+        <button id="ed-distraction-exit-btn" data-i18n-title="editor.distractionFreeExitTooltip" class="icon-btn" hidden></button>
         <div id="ed-wrap">
           <pre id="ed-highlight" aria-hidden="true"></pre>
           <textarea id="ed-input" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
@@ -321,7 +345,12 @@
             <button id="ed-ctx-underline" class="icon-label-btn action-row"></button>
             <button id="ed-ctx-strike" class="icon-label-btn action-row"></button>
             <button id="ed-ctx-comment" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-list" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-checkbox" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-indent" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-dedent" class="icon-label-btn action-row"></button>
             <button id="ed-ctx-date" class="icon-label-btn action-row"></button>
+            <button id="ed-ctx-eval" class="icon-label-btn action-row" hidden></button>
           </div>
         </div>
         <div id="ed-preview" hidden></div>
@@ -423,6 +452,26 @@
   <div id="tag-browser-list"></div>
 </dialog>
 
+<!-- Repository color tag (palette fixe, comme RepositoryColorTag.kt côté Android) -->
+<dialog id="repo-color-dlg">
+  <div id="repo-color-header">
+    <span data-i18n="repo.colorDialogTitle"></span>
+    <button id="repo-color-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <div id="repo-color-swatches"></div>
+  <button id="repo-color-none" class="action-row" data-i18n="repo.colorNone"></button>
+  <!-- Sélecteur de couleur personnalisée (round 26/27) : un bloc unique
+       distinct de la liste ci-dessus — la pastille EST le déclencheur du
+       sélecteur natif, "Valider" vit juste à côté d'elle plutôt que dans
+       une ligne séparée du menu "couleur du dépôt". -->
+  <div id="repo-color-custom-row">
+    <span data-i18n="repo.colorCustom"></span>
+    <button id="repo-color-custom-swatch" class="repo-color-swatch" data-i18n-title="repo.colorCustomPickTooltip"></button>
+    <button id="repo-color-custom-confirm" data-i18n="repo.colorCustomConfirm" disabled></button>
+  </div>
+  <input id="repo-color-custom-input" type="color" hidden>
+</dialog>
+
 <!-- New note -->
 <dialog id="new-note-dlg">
   <div id="new-note-header">
@@ -444,6 +493,7 @@
     <button id="note-actions-close" data-i18n-title="common.close">✕</button>
   </div>
   <div id="note-actions-body">
+    <button id="note-actions-favorite" class="icon-label-btn action-row"></button>
     <button id="note-actions-rename" class="icon-label-btn action-row"></button>
     <button id="note-actions-move" class="icon-label-btn action-row"></button>
     <button id="note-actions-duplicate" class="icon-label-btn action-row"></button>
