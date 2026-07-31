@@ -2274,6 +2274,44 @@ seulement au relâchement.
   réelle, pas de nouvelle logique pure testable en Node). **Non vérifié
   avec une souris physique** — même limite que le round 30.
 
+**Round 32 (2026-07-31, demande explicite) — "x" de fermeture pour la liste
+de fichiers épinglée, même principe que le panneau TOC** : nouveau bouton
+`#browser-sidebar-close-btn` ("✕") tout à droite de `#browser-header`,
+visible SEULEMENT en mode liste épinglée (`body.sticky-workspace-active`,
+réglage `fileListSidebarMode`) — jamais en navigation plein écran normale,
+où fermer "la liste" n'aurait aucun sens (c'est le seul écran affiché).
+- **Comportement calqué sur `#toc-panel-close-btn`** (round 11/12) : masque
+  la liste pour récupérer tout le focus sur le texte SANS désactiver le
+  réglage `fileListSidebarMode` lui-même — juste "cachée pour l'instant".
+  Nouvelle variable de session `_fileListSidebarHiddenByUser` (editor.js,
+  jamais persistée) : `open()` (changer de note) la respecte et ne réaffiche
+  pas la liste tant qu'elle est masquée — même principe que le panneau TOC,
+  qui ne se rouvre jamais tout seul une fois fermé explicitement
+  (`!el('toc-panel').hidden` gardait déjà ce même genre d'état pour le TOC).
+- **Différence assumée avec le TOC, pour une raison concrète** : `close()`
+  (fermer la note actuellement affichée, sans quitter le dépôt) RÉINITIALISE
+  `_fileListSidebarHiddenByUser` et réaffiche la liste — contrairement au
+  panneau TOC qui, lui, se referme aussi à ce moment (`hideTocSidebar()`
+  inconditionnel). Nécessaire : sans note ouverte, l'écran vide
+  (`#editor-empty-state`, "Choisis une note...") ne propose AUCUN autre
+  moyen de choisir une note si la liste reste masquée — l'utilisateur serait
+  coincé. Le TOC n'a pas ce problème (il n'est jamais le seul moyen de
+  naviguer).
+- Bouton câblé côté `browser.js` (`Editor.hideFileListSidebar()`, nouvel
+  export du module Editor) plutôt que directement dans `editor.js`, car le
+  bouton lui-même vit dans le DOM de `#browser-header` (browser.js) — pas de
+  duplication de la logique de masquage entre les deux fichiers.
+  `updateSidebarCloseButton()` (browser.js, appelée depuis `render()`)
+  synchronise sa visibilité sur la classe `sticky-workspace-active` à chaque
+  rafraîchissement de la liste.
+- 2 nouvelles clés i18n × 2 langues (192 au total FR/EN toujours strictement
+  synchronisées : `browser.closeSidebarTooltip`). `make clean && make test`
+  (198/198, inchangé — DOM/state uniquement), cross-check des IDs (aucun
+  manquant). **Non testé visuellement dans un navigateur réel** (limite
+  habituelle de cet environnement) — en particulier l'apparition/
+  disparition du bouton au bon moment en changeant de note, de dépôt, ou en
+  passant par les Réglages pendant que la liste est masquée.
+
 ## Ne jamais faire
 
 - Ne jamais commiter au nom de l'utilisateur sans demande explicite.

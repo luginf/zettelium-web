@@ -98,6 +98,7 @@ const I18n = (() => {
 
       'browser.backTooltip': 'Dossier parent (ou retour aux dépôts à la racine)',
       'browser.moreTooltip': 'Plus d\'options',
+      'browser.closeSidebarTooltip': 'Fermer la liste des fichiers',
       'browser.repoOptionsTitle': 'Options du dépôt',
       'browser.repoNameLabel': 'Nom du dépôt',
       'browser.repairLinksLabel': 'Réparer les liens',
@@ -296,6 +297,7 @@ const I18n = (() => {
 
       'browser.backTooltip': 'Parent folder (or back to repositories at the root)',
       'browser.moreTooltip': 'More options',
+      'browser.closeSidebarTooltip': 'Close the file list',
       'browser.repoOptionsTitle': 'Repository options',
       'browser.repoNameLabel': 'Repository name',
       'browser.repairLinksLabel': 'Repair links',

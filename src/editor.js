@@ -49,6 +49,18 @@ const Editor = (() => {
   // puisqu'il reflète déjà l'état actuel (post-défilement) du contenu.
   let _dragAnchorOffset = null;
   let _didDragSelect = false;
+
+  // Liste de fichiers épinglée masquée par l'utilisateur (round 32, "x" tout
+  // à droite de la liste — même principe que `#toc-panel-close-btn`) —
+  // variable de session pure, comme `_tocPinned` (retiré round 12) : jamais
+  // persistée, ne modifie PAS `State.settings.fileListSidebarMode` lui-même
+  // (qui reste actif), juste "cachée pour l'instant". `open()` la respecte
+  // en changeant de note (ne réaffiche pas la liste tant qu'elle est
+  // masquée), `close()` la réinitialise (rouvrir la liste quand plus aucune
+  // note n'est affichée, pour ne pas coincer l'utilisateur sans aucun moyen
+  // de choisir une autre note).
+  let _fileListSidebarHiddenByUser = false;
+
   // Throttle de l'aperçu visuel du glisser (round 31) — voir le listener
   // 'mousemove' plus bas.
   let _lastDragPreviewTime = 0;
@@ -125,7 +137,11 @@ const Editor = (() => {
     // (`Settings.open`) la retire.
     const sticky = State.settings.fileListSidebarMode;
     document.body.classList.toggle('sticky-workspace-active', sticky);
-    el('browser-screen').hidden = sticky ? false : true;
+    // Round 32 : si l'utilisateur a masqué la liste via le "x" pendant
+    // cette session, elle reste masquée en changeant de note — même
+    // principe que le panneau TOC, qui ne se rouvre jamais tout seul non
+    // plus une fois fermé explicitement.
+    el('browser-screen').hidden = sticky ? _fileListSidebarHiddenByUser : true;
     el('editor-screen').hidden = false;
     el('editor-note-view').hidden = false;
     el('editor-empty-state').hidden = true;
@@ -776,6 +792,12 @@ const Editor = (() => {
     if (document.body.classList.contains('sticky-workspace-active')) {
       el('editor-note-view').hidden = true;
       el('editor-empty-state').hidden = false;
+      // Round 32 : si la liste était masquée par l'utilisateur (le "x"),
+      // la réafficher maintenant — plus aucune note n'est ouverte, la
+      // laisser masquée coincerait l'utilisateur sans aucun moyen d'en
+      // choisir une autre.
+      _fileListSidebarHiddenByUser = false;
+      el('browser-screen').hidden = false;
       Browser.render(); // efface le surlignage de la note qui vient de fermer
     } else {
       el('editor-screen').hidden = true;
@@ -1216,6 +1238,16 @@ const Editor = (() => {
 
   function hideTocSidebar() {
     el('toc-panel').hidden = true;
+  }
+
+  // Masque la liste de fichiers épinglée (round 32, "x" tout à droite de la
+  // liste — bouton câblé côté browser.js, `#browser-sidebar-close-btn`,
+  // visible seulement en mode épinglé) — voir le commentaire de
+  // `_fileListSidebarHiddenByUser` plus haut : ne modifie jamais le réglage
+  // `fileListSidebarMode` lui-même, juste "cachée pour l'instant".
+  function hideFileListSidebar() {
+    _fileListSidebarHiddenByUser = true;
+    el('browser-screen').hidden = true;
   }
 
   // En édition : place le curseur et fait défiler jusqu'à la ligne de titre
@@ -1742,5 +1774,5 @@ const Editor = (() => {
     return _file ? _file.path : null;
   }
 
-  return { init, open, openOther, requestClose, currentPath, isDistractionFree };
+  return { init, open, openOther, requestClose, currentPath, isDistractionFree, hideFileListSidebar };
 })();

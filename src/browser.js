@@ -556,6 +556,7 @@ const Browser = (() => {
     syncRepoOptionsUI();
     updateSortButton();
     updateSearchScopeButton();
+    updateSidebarCloseButton();
 
     const list = el('browser-list');
     list.innerHTML = '';
@@ -777,6 +778,13 @@ const Browser = (() => {
       : I18n.t('browser.searchScopeRepoTooltip');
   }
 
+  // "x" de fermeture de la liste épinglée (round 32) — visible seulement en
+  // mode épinglé (`body.sticky-workspace-active`), jamais en navigation
+  // plein écran normale, où il n'y aurait rien de sensé à "fermer".
+  function updateSidebarCloseButton() {
+    el('browser-sidebar-close-btn').hidden = !document.body.classList.contains('sticky-workspace-active');
+  }
+
   function toggleSearchScope() {
     _searchScope = _searchScope === 'all' ? 'repo' : 'all';
     if (_searchScope === 'all') reindexAllRepos(); // not awaited — see reindexAllRepos() comment
@@ -914,6 +922,7 @@ const Browser = (() => {
     el('browser-refresh-btn').addEventListener('click', async () => { await rescan(); reindexActive(); });
     el('browser-sort-btn').addEventListener('click', toggleSort);
     el('browser-search-scope-btn').addEventListener('click', toggleSearchScope);
+    el('browser-sidebar-close-btn').addEventListener('click', () => Editor.hideFileListSidebar());
 
     el('browser-menu-btn').addEventListener('click', toggleBrowserMenu);
     el('browser-menu-repo-options').addEventListener('click', runBrowserMenuAction(openRepoOptions));
