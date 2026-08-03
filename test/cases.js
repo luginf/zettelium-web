@@ -925,6 +925,12 @@ test('SExprEval keeps a fractional result as-is', () => {
   assert.equal(evalSuccess(SExprEval, '(/ 5 2)'), '2.5');
 });
 
+test('SExprEval rounds away binary floating-point noise from a subtraction', () => {
+  // 3.5 - 3.2 vaut en réalité 0.2999999999999998 en IEEE 754 — le résultat affiché
+  // doit rester "0.3", pas le bruit binaire brut.
+  assert.equal(evalSuccess(SExprEval, '(- 3.5 3.2)'), '0.3');
+});
+
 test('SExprEval trims surrounding whitespace before evaluating', () => {
   assert.equal(evalSuccess(SExprEval, '  (+ 1 2)  '), '3');
 });
@@ -970,6 +976,10 @@ test('RpnEval divides in push order', () => {
   assert.equal(evalSuccess(RpnEval, '5 2 /'), '2.5');
 });
 
+test('RpnEval rounds away binary floating-point noise from a subtraction', () => {
+  assert.equal(evalSuccess(RpnEval, '3.5 3.2 -'), '0.3');
+});
+
 test('RpnEval unary functions pop a single operand', () => {
   assert.equal(evalSuccess(RpnEval, '9 sqrt'), '3');
   assert.equal(evalSuccess(RpnEval, '-5 abs'), '5');
@@ -998,6 +1008,10 @@ test('RpnEval fails on an unknown token', () => {
 
 test('InfixEval evaluates a simple subtraction with the trailing equals sign', () => {
   assert.equal(evalSuccess(InfixEval, '34-12='), '22');
+});
+
+test('InfixEval rounds away binary floating-point noise from a subtraction', () => {
+  assert.equal(evalSuccess(InfixEval, '3.5-3.2='), '0.3');
 });
 
 test('InfixEval respects operator precedence', () => {
@@ -1259,4 +1273,100 @@ test('assignIndices distinguishes two structurally identical empty checkbox item
   const indices = Txt2TagsChecklist.assignIndices(blocks);
   assert.equal(indices.get(list.items[0]), 0);
   assert.equal(indices.get(list.items[1]), 1);
+});
+
+// --- Notes chiffrées (crypto.js) — derived from NoteCryptoTest.kt (zettelium-android,
+// round 27) --- Itérations faibles dans ces tests (pas NoteCrypto.DEFAULT_ITERATIONS) : la
+// correction de l'algorithme ne dépend pas du nombre d'itérations, seule la résistance aux
+// attaques en dépend, non pertinent pour un test unitaire rapide.
+const CRYPTO_TEST_ITERATIONS = 50;
+
+const SAMPLE_ENVELOPE_HEADER = [
+  'qon-crypto: 2',
+  'kdf: PBKDF2-HMAC-SHA1',
+  'kdf-iterations: 300000',
+  'salt: mSJNSY56VjGKMTiqjkcSi+eS0MVJu+mEdctwuL20iWE=',
+  'cipher: AES-256-CBC-PKCS7-HMAC-SHA1',
+  'nonce: D14ZbyZ5rh0yAosmWYMc/g==',
+  'mac: O3Y2+3SyVvJuv29pjpaxPlGf/4c=',
+  '',
+  'dcRuSO13bcDTvtxaAsp6VcR3Ym4YvGAmu9i/EBufWO4=',
+].join('\n');
+
+function sampleEncryptedNote() {
+  return `= titre =\n\n${NoteCrypto.WARNING_COMMENT}\n\n${NoteCrypto.ENCRYPTION_PRE}\n${SAMPLE_ENVELOPE_HEADER}\n${NoteCrypto.ENCRYPTION_POST}`;
+}
+
+test('findEncryptedBlock detects the QOwnNotes marker pair and parses the header', () => {
+  const block = NoteCrypto.findEncryptedBlock(sampleEncryptedNote());
+  assert.ok(block);
+  assert.ok(block.envelope);
+  assert.equal(block.envelope.iterations, 300000);
+  assert.equal(block.envelope.saltBase64, 'mSJNSY56VjGKMTiqjkcSi+eS0MVJu+mEdctwuL20iWE=');
+  assert.equal(block.envelope.nonceBase64, 'D14ZbyZ5rh0yAosmWYMc/g==');
+  assert.equal(block.envelope.macBase64, 'O3Y2+3SyVvJuv29pjpaxPlGf/4c=');
+  assert.equal(block.envelope.cipherTextBase64, 'dcRuSO13bcDTvtxaAsp6VcR3Ym4YvGAmu9i/EBufWO4=');
+});
+
+test('findEncryptedBlock returns a null envelope for markers without a recognizable header', () => {
+  const content = `= titre =\n\n${NoteCrypto.ENCRYPTION_PRE}\nplain garbage\n${NoteCrypto.ENCRYPTION_POST}`;
+  const block = NoteCrypto.findEncryptedBlock(content);
+  assert.ok(block);
+  assert.equal(block.envelope, null);
+});
+
+test('findEncryptedBlock returns null when there are no markers at all', () => {
+  assert.equal(NoteCrypto.findEncryptedBlock('= titre =\n\nUn paragraphe normal.'), null);
+});
+
+test('encrypt then decrypt round-trips the body text exactly with the right password', async () => {
+  const body = 'Ceci est un secret avec des accents : café, éàïôû.\nDeuxième ligne.';
+  const fullText = `= titre =\n\n${body}`;
+  const encrypted = await NoteCrypto.encryptNoteText(fullText, 'correct horse battery staple', CRYPTO_TEST_ITERATIONS);
+
+  const block = NoteCrypto.findEncryptedBlock(encrypted);
+  assert.ok(block);
+  assert.ok(block.envelope);
+
+  // Le CORPS chiffré/déchiffré est restitué octet pour octet.
+  const plaintext = await NoteCrypto.decrypt(block.envelope, 'correct horse battery staple');
+  assert.equal(plaintext, body);
+
+  // La reconstruction du texte COMPLET (`buildDecryptedText`) n'est en revanche pas un
+  // aller-retour parfait sur les espacements : QOwnNotes insère toujours une ligne vide
+  // séparatrice avant le commentaire d'avertissement à l'encryption, et son retrait au
+  // déchiffrement n'en efface qu'une seule — une ligne vide supplémentaire par rapport à
+  // l'original subsiste après un aller-retour, comportement fidèle à QOwnNotes lui-même
+  // (voir NoteCrypto.kt), pas une régression de ce port.
+  const decryptedFull = NoteCrypto.buildDecryptedText(encrypted, block, plaintext);
+  assert.equal(decryptedFull, `= titre =\n\n\n${body}`);
+});
+
+test('decrypt fails with the wrong password', async () => {
+  const encrypted = await NoteCrypto.encryptNoteText('= titre =\n\ncorps', 'bonpassword', CRYPTO_TEST_ITERATIONS);
+  const envelope = NoteCrypto.findEncryptedBlock(encrypted).envelope;
+  assert.equal(await NoteCrypto.decrypt(envelope, 'mauvaispassword'), null);
+});
+
+test('decrypt fails when the ciphertext has been tampered with', async () => {
+  const encrypted = await NoteCrypto.encryptNoteText('= titre =\n\ncorps', 'bonpassword', CRYPTO_TEST_ITERATIONS);
+  const envelope = NoteCrypto.findEncryptedBlock(encrypted).envelope;
+  const tampered = { ...envelope, cipherTextBase64: envelope.cipherTextBase64.slice(0, -4) + 'AAAA' };
+  assert.equal(await NoteCrypto.decrypt(tampered, 'bonpassword'), null);
+});
+
+test('encryptNoteText keeps only the first two lines unencrypted', async () => {
+  const fullText = 'titre\nsous-titre\ncorps ligne 1\ncorps ligne 2';
+  const encrypted = await NoteCrypto.encryptNoteText(fullText, 'pw', CRYPTO_TEST_ITERATIONS);
+  assert.ok(encrypted.startsWith('titre\nsous-titre\n'));
+  assert.ok(encrypted.includes(NoteCrypto.WARNING_COMMENT));
+  assert.ok(encrypted.includes(NoteCrypto.ENCRYPTION_PRE));
+  assert.ok(encrypted.includes(NoteCrypto.ENCRYPTION_POST));
+});
+
+test('an empty body is encrypted as a single space rather than rejected', async () => {
+  const encrypted = await NoteCrypto.encryptNoteText('titre seul', 'pw', CRYPTO_TEST_ITERATIONS);
+  const block = NoteCrypto.findEncryptedBlock(encrypted);
+  const plaintext = await NoteCrypto.decrypt(block.envelope, 'pw');
+  assert.equal(plaintext, ' ');
 });

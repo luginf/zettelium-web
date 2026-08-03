@@ -2479,6 +2479,104 @@ test à 40 titres, même méthodologie que les rounds précédents).
   sur une note réelle avec plusieurs dizaines de titres et un facteur de
   marge élevé.
 
+**Round 35 (2026-08-03) — bruit binaire dans les résultats de calcul (`3.5 - 3.2` →
+`0.2999999999999998`)** : retour utilisateur, identique côté `zettelium-android` (même
+correctif appliqué là-bas en parallèle). `math-eval.js/formatNumber` (partagée par les trois
+notations — préfixe Lisp, RPN, infixe) formatait tout résultat non entier avec `String(n)`
+brut, exposant la représentation IEEE 754 réelle du `Number` JS plutôt que la valeur
+"attendue" — `3.5 - 3.2` n'est mathématiquement pas représentable exactement en binaire,
+stocké comme `0.2999999999999998`. Corrigé en arrondissant à 12 chiffres significatifs avant
+formatage (`Number(n.toPrecision(12))`, puis `String(...)` sur ce nombre déjà arrondi/
+reparsé plutôt que sur `n` — `toPrecision` absorbe le bruit résiduel, `Number()` reparse en
+un `Number` JS "propre" dont la représentation par défaut est la plus courte possible pour
+cette valeur, donc `"0.3"` et non `"0.300000000000"`). Le cas entier (déjà géré séparément
+via `Math.trunc`) n'est pas affecté. 3 tests ajoutés (`test/cases.js`, un par notation —
+`SExprEval`/`RpnEval`/`InfixEval`), miroir exact du correctif et des tests côté
+`zettelium-android` (`SExprEvalTest`/`RpnEvalTest`/`InfixEvalTest`, `formatNumber` dans
+`SExprEval.kt` réutilisée par les trois évaluateurs Kotlin de la même façon). `make clean &&
+make test` passe (201/201, +3).
+
+**Round 36 (2026-08-03) — notes chiffrées façon QOwnNotes, écartées au round 21 (parité
+Android 27/38)** : demande explicite après confirmation — round 21 avait noté "écartés
+explicitement par l'utilisateur" pour cette fonctionnalité ; question reposée cette fois
+avant d'implémenter ("tout le côté Android round 27 + les deux améliorations round 38
+tout de suite"), confirmée. Port complet en un seul round (contrairement à Android, qui
+avait ajouté le chiffrement au round 27 puis la coche mot de passe/le "annuler n'exclut
+pas" au round 38 suite à un retour) — les deux améliorations sont donc natives ici dès le
+départ, pas un correctif après coup.
+- `src/crypto.js` (nouveau, pur, testé — 8 tests dans `test/cases.js`, mêmes cas que
+  `NoteCryptoTest.kt`) : port de `NoteCrypto.kt` — PBKDF2-HMAC-SHA1 (300 000 itérations, 64
+  octets dérivés), AES-256-CBC-PKCS7, HMAC-SHA1(nonce ‖ texte chiffré) vérifié avant tout
+  déchiffrement, marqueurs `<!-- BEGIN/END ENCRYPTED TEXT -->`. **Déviation délibérée** :
+  contrairement à la version Kotlin, PBKDF2 n'est PAS réimplémenté à la main — la raison de
+  ce choix côté Android (`SecretKeyFactory`/`PBEKeySpec` sans garantie documentée sur
+  l'encodage d'un mot de passe non-ASCII) ne s'applique pas ici : `crypto.subtle
+  .importKey('raw', bytes, ...)` reçoit des octets déjà encodés en UTF-8 par nous-mêmes
+  (`TextEncoder`), aucune ambiguïté possible. `crypto.subtle.deriveBits({name:'PBKDF2',
+  hash:'SHA-1', ...})` est natif et disponible identiquement en navigateur et sous Node 22+
+  (utilisé par `test/run.js`) — pas de code à maintenir en plus pour ça. Toutes les
+  opérations (`encrypt`/`decrypt`/`encryptNoteText`) sont donc `async` (Web Crypto est
+  Promise-based), contrairement aux fonctions synchrones de `NoteCrypto.kt`.
+- `src/icons.js` : deux icônes Feather ajoutées (`lock`/`unlock`) — mêmes glyphes que
+  `Icons.Filled.Lock`/`Icons.Filled.LockOpen` côté Android (indicateur de barre d'appli +
+  menu "Chiffrer"/"Déchiffrer").
+- `src/editor.js` : nouvel état de module `_isEncrypted`/`_cryptoPassword` (jamais persisté
+  — même choix qu'Android, vit seulement en mémoire pour la durée de vie de la note
+  ouverte). `resolveDisplayContent(rawContent)` (appelée par `open()` ET `reloadFromDisk()`,
+  un seul point de résolution) détecte un bloc chiffré, réutilise le mot de passe de
+  session s'il fonctionne encore, sinon ouvre `#note-password-dlg`
+  (`promptForPassword`/`confirmPasswordPrompt`/`cancelPasswordPrompt`) — **annuler
+  n'exclut PAS de la note** (comportement round 38 Android, natif ici dès le départ) :
+  `_isEncrypted` reste vrai mais `_cryptoPassword` reste `null`, le texte BRUT (titre en
+  clair + bloc chiffré intact) est affiché tel quel, éditable autour du bloc chiffré sans
+  jamais le déchiffrer. `toDiskContent(content)` (appelée par `save()`, avant l'écriture
+  FSA) rechiffre à la volée si un mot de passe de session est connu, sinon réécrit le
+  contenu tel quel — le bloc chiffré traverse alors intact tant que l'utilisateur ne le
+  modifie pas lui-même à la main. `Index.indexNote` est appelée avec `diskContent` (pas le
+  texte en clair) après enregistrement, cohérent avec l'indexation passive d'un dépôt
+  entier (`Index.indexRepository`), qui ne voit jamais que les octets bruts du fichier —
+  sans effet sur le titre/zkId détectés (toujours dans les 1-2 premières lignes, restées en
+  clair par construction du format).
+- **Coche "Masquer le mot de passe"** (`#note-password-dlg` et `#encrypt-note-dlg`,
+  `applyPasswordVisibility` bascule `input.type` entre `"password"` et `"text"`) : cochée
+  par défaut (masqué, comportement historique), décochée révèle le mot de passe en clair.
+  Réutilise le composant `.switch`/`.settings-row` déjà utilisé ailleurs dans l'appli pour
+  tout réglage booléen (`settings-autosave`, `repo-options-include-extension`) plutôt qu'une
+  case à cocher native brute — cohérence visuelle avec le reste de l'UI. Une seule coche
+  partagée pour les deux champs de `#encrypt-note-dlg` (mot de passe + confirmation) : la
+  confirmation existe déjà pour compenser l'absence de visibilité, les révéler ensemble
+  reste cohérent.
+- **Menu "⋮"** : "Chiffrer la note"/"Déchiffrer la note" ajoutés juste après "Restaurer une
+  sauvegarde" et avant "Réglages" (même position relative qu'Android — juste avant
+  "garder l'écran allumé", non porté ici, round 21 : déjà écarté). Mutuellement exclusifs
+  (`updateEditorMenuVisibility`), indépendants du mode aperçu (contrairement à
+  insert-id/insert-link/goto-id/recherche, masqués en aperçu).
+- Indicateur cadenas non cliquable dans la barre d'appli (`#editor-encrypted-icon`, un
+  `<span class="icon-btn">` sans gestionnaire de clic — réutilise la classe `.icon-btn`
+  pour l'alignement/le padding sans en faire un vrai bouton) entre le bouton aperçu et le
+  bouton enregistrer, même emplacement relatif qu'Android.
+- **Déviation délibérée sur le timing d'affichage** : `open()` résout entièrement le
+  contenu (y compris la demande de mot de passe éventuelle) AVANT de basculer l'écran du
+  navigateur vers l'éditeur — contrairement à Android, où l'écran éditeur (bandeau
+  compris) est déjà visible avec le dialogue flottant par-dessus dès l'état
+  `PasswordRequired`. Choix pragmatique pour cette version web : évite un flash d'éditeur
+  presque vide derrière la modale native `<dialog>` ; l'utilisateur voit le navigateur de
+  fichiers jusqu'à ce que le mot de passe soit tranché (soumis ou annulé), puis l'écran
+  bascule directement sur le contenu final. Pas un problème fonctionnel, juste un ordre
+  d'affichage différent.
+- 15 nouvelles clés i18n × 2 langues (207 au total FR/EN, toujours strictement
+  synchronisées — vérifié par un script ad hoc comparant les deux jeux de clés).
+
+**Vérifié par une reproduction automatisée minimale** (headless Chrome, `--headless=new`,
+`--dump-dom` + capture des logs du renderer) : la page se charge sans exception JS non
+interceptée, `#editor-encrypted-icon`/`#note-password-dlg` sont bien présents dans le DOM
+rendu. **Pas de test fonctionnel réel** (choisir un dossier via File System Access API
+nécessite un vrai geste utilisateur, non simulable en headless) : chiffrer une note,
+rouvrir l'app, entrer le mot de passe, annuler et vérifier l'édition du texte brut autour
+du bloc chiffré, et surtout l'interopérabilité avec une note RÉELLEMENT chiffrée par
+QOwnNotes lui-même restent à confirmer par l'utilisateur — mêmes réserves que le round 27
+côté Android. `make clean && make test` passe (209/209, +8 pour `crypto.js`).
+
 ## Ne jamais faire
 
 - Ne jamais commiter au nom de l'utilisateur sans demande explicite.

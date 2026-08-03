@@ -292,6 +292,9 @@
           <span id="editor-backlinks-icon"></span>
         </button>
         <button id="editor-preview-btn" data-i18n-title="editor.previewTooltip" class="icon-btn"></button>
+        <!-- Notes chiffrées façon QOwnNotes (round 27 Android, porté ici) — simple
+             indicateur (pas un bouton), la note actuellement ouverte est chiffrée. -->
+        <span id="editor-encrypted-icon" class="icon-btn" data-i18n-title="editor.encryptedIndicatorTooltip" hidden></span>
         <button id="editor-save-btn" data-i18n-title="editor.saveTooltip" class="icon-btn" disabled></button>
         <div id="editor-menu-wrap">
           <button id="editor-menu-btn" data-i18n-title="editor.moreTooltip">⋮</button>
@@ -304,6 +307,8 @@
             <button id="editor-menu-rename" class="icon-label-btn"></button>
             <button id="editor-menu-backup-create" class="icon-label-btn"></button>
             <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
+            <button id="editor-menu-encrypt" class="icon-label-btn"></button>
+            <button id="editor-menu-decrypt" class="icon-label-btn"></button>
             <button id="editor-menu-settings" class="icon-label-btn"></button>
           </div>
         </div>
@@ -444,6 +449,62 @@
   </div>
   <p id="backup-restore-empty-hint" class="hint" data-i18n="editor.backupEmptyHint" hidden></p>
   <div id="backup-restore-list"></div>
+</dialog>
+
+<!-- Notes chiffrées façon QOwnNotes (round 27 Android, porté ici) : demande le mot de
+     passe d'une note chiffrée détectée à l'ouverture. Annuler n'exclut pas de la note
+     (round 38 Android) : affiche le contenu brut (titre en clair + bloc chiffré intact)
+     tel quel, éditable autour du bloc chiffré sans le déchiffrer — voir editor.js
+     `resolveDisplayContent`. -->
+<dialog id="note-password-dlg">
+  <div id="note-password-header">
+    <span data-i18n="editor.encryptedPasswordTitle"></span>
+  </div>
+  <p data-i18n="editor.encryptedPasswordText"></p>
+  <input type="password" id="note-password-input" data-i18n-placeholder="editor.passwordPlaceholder" autocomplete="off">
+  <p id="note-password-error" class="hint" data-i18n="editor.encryptedPasswordError" hidden></p>
+  <label class="settings-row settings-switch-row">
+    <span class="settings-row-info"><span data-i18n="editor.passwordHideToggle"></span></span>
+    <span class="switch"><input type="checkbox" id="note-password-hide-toggle" checked><span class="switch-track"></span></span>
+  </label>
+  <div class="dlg-btn-row">
+    <button id="note-password-cancel" data-i18n="common.cancel"></button>
+    <button id="note-password-confirm" data-i18n="editor.encryptedUnlockAction"></button>
+  </div>
+</dialog>
+
+<!-- Chiffrer la note (menu ⋮) — mot de passe + confirmation, une faute de frappe rendrait
+     la note illisible sans lui. Une seule coche "masquer" partagée par les deux champs :
+     la confirmation existe déjà pour compenser l'absence de visibilité, les révéler
+     ensemble reste cohérent. -->
+<dialog id="encrypt-note-dlg">
+  <div id="encrypt-note-header">
+    <span data-i18n="editor.encryptNoteTitle"></span>
+  </div>
+  <p data-i18n="editor.encryptNoteText"></p>
+  <input type="password" id="encrypt-note-password" data-i18n-placeholder="editor.passwordPlaceholder" autocomplete="off">
+  <input type="password" id="encrypt-note-confirm-password" data-i18n-placeholder="editor.passwordConfirmPlaceholder" autocomplete="off">
+  <p id="encrypt-note-mismatch" class="hint" data-i18n="editor.passwordMismatch" hidden></p>
+  <label class="settings-row settings-switch-row">
+    <span class="settings-row-info"><span data-i18n="editor.passwordHideToggle"></span></span>
+    <span class="switch"><input type="checkbox" id="encrypt-note-hide-toggle" checked><span class="switch-track"></span></span>
+  </label>
+  <div class="dlg-btn-row">
+    <button id="encrypt-note-cancel" data-i18n="common.cancel"></button>
+    <button id="encrypt-note-confirm" data-i18n="editor.encryptNoteConfirm"></button>
+  </div>
+</dialog>
+
+<!-- Déchiffrer la note (retrait définitif du chiffrement, menu ⋮) — simple confirmation. -->
+<dialog id="decrypt-note-dlg">
+  <div id="decrypt-note-header">
+    <span data-i18n="editor.decryptNoteTitle"></span>
+  </div>
+  <p data-i18n="editor.decryptNoteText"></p>
+  <div class="dlg-btn-row">
+    <button id="decrypt-note-cancel" data-i18n="common.cancel"></button>
+    <button id="decrypt-note-confirm" data-i18n="editor.decryptNoteConfirm"></button>
+  </div>
 </dialog>
 
 <!-- Tag browser -->

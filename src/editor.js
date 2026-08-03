@@ -71,6 +71,19 @@ const Editor = (() => {
   let _matches    = [];
   let _matchIdx   = -1;
 
+  // Notes chiffrées façon QOwnNotes (`qon-crypto: 2`, voir crypto.js — port de
+  // zettelium-android round 27/38, `NoteCrypto`/`EditorViewModel`). Le contenu affiché/
+  // édité (`ta().value`) reste TOUJOURS le texte en clair quand `_cryptoPassword` est
+  // connu (édition/undo/recherche/TOC portent dessus sans changement) ; seule l'écriture
+  // sur disque (voir `toDiskContent`) rechiffre à la volée avec un nouveau salt/nonce à
+  // chaque fois. Le mot de passe n'est JAMAIS persisté (SharedPreferences/localStorage) —
+  // vit seulement dans cette variable de module, perdu à la fermeture de la note/de
+  // l'onglet, redemandé à chaque ouverture (même choix explicite qu'Android).
+  let _isEncrypted = false;
+  let _cryptoPassword = null;
+  // Contexte de la demande de mot de passe en cours (`promptForPassword`), `null` sinon.
+  let _passwordPromptCtx = null;
+
   // Sauvegarde automatique (round 10) — porté d'`EditorViewModel
   // .scheduleAutosave`/`AUTOSAVE_DELAY_MS` : vrai debounce (2s d'inactivité
   // de frappe, pas un intervalle fixe — chaque frappe repousse le
@@ -111,9 +124,9 @@ const Editor = (() => {
   async function open(file, options = {}) {
     await saveCursorPosition(); // de la note précédente, si l'éditeur était déjà ouvert sur une autre
 
-    let content;
+    let rawContent;
     try {
-      content = await FSA.readFileText(file.fileHandle);
+      rawContent = await FSA.readFileText(file.fileHandle);
     } catch (e) {
       alert(I18n.t('editor.openFailed', { name: file.name, error: e.message }));
       return;
@@ -123,12 +136,20 @@ const Editor = (() => {
     _file = file;
     _dirty = false;
     _previewMode = false;
-    _zkId = detectZkId(file, content);
+    _isEncrypted = false;
+    _cryptoPassword = null;
     try {
       _baselineMtime = (await file.fileHandle.getFile()).lastModified;
     } catch (e) {
       _baselineMtime = file.lastModified;
     }
+
+    // Détecte un bloc chiffré façon QOwnNotes (`qon-crypto: 2`, voir crypto.js) — s'il y en
+    // a un, demande le mot de passe (annuler affiche le contenu brut tel quel, éditable
+    // autour du bloc chiffré sans le déchiffrer — round 38 Android, porté ici dès le
+    // départ). Met à jour `_isEncrypted`/`_cryptoPassword`.
+    const content = await resolveDisplayContent(rawContent);
+    _zkId = detectZkId(file, content);
 
     // Liste de fichiers épinglée (round 19) : ne cache pas le navigateur,
     // et une fois entré dans ce mode, `sticky-workspace-active` reste posée
@@ -229,9 +250,141 @@ const Editor = (() => {
     return ZettelkastenLinks.extractId(file.name, content, idRegex);
   }
 
+  // --- Notes chiffrées façon QOwnNotes (crypto.js) ----------------------------
+
+  // Résout le contenu à AFFICHER/ÉDITER pour `rawContent` (le texte tel qu'il est
+  // réellement sur le disque) : si aucun bloc chiffré n'y est détecté, le renvoie tel
+  // quel. Sinon, réutilise le mot de passe de session s'il fonctionne encore (cas d'un
+  // rechargement — `reloadFromDisk` — pendant que la note est déjà déverrouillée), sinon
+  // demande le mot de passe (`promptForPassword`). Annuler la demande N'EXCLUT PAS de la
+  // note (round 38 Android, porté ici dès le départ) : `_isEncrypted` reste vrai (la note
+  // EST toujours chiffrée sur le disque) mais `_cryptoPassword` reste `null` — le texte
+  // brut (titre en clair + bloc chiffré intact) est affiché tel quel, éditable AUTOUR du
+  // bloc chiffré sans jamais le déchiffrer ; `toDiskContent` (voir `save()`) réécrira ce
+  // texte tel quel puisqu'aucun mot de passe n'est connu pour le rechiffrer.
+  async function resolveDisplayContent(rawContent) {
+    const block = NoteCrypto.findEncryptedBlock(rawContent);
+    if (!block || !block.envelope) {
+      _isEncrypted = false;
+      _cryptoPassword = null;
+      return rawContent;
+    }
+    if (_cryptoPassword) {
+      const cached = await NoteCrypto.decrypt(block.envelope, _cryptoPassword);
+      if (cached !== null) {
+        _isEncrypted = true;
+        return NoteCrypto.buildDecryptedText(rawContent, block, cached);
+      }
+    }
+    const result = await promptForPassword(block.envelope);
+    if (!result) {
+      _isEncrypted = true;
+      _cryptoPassword = null;
+      return rawContent;
+    }
+    _isEncrypted = true;
+    _cryptoPassword = result.password;
+    return NoteCrypto.buildDecryptedText(rawContent, block, result.plaintext);
+  }
+
+  // Affiche `#note-password-dlg` et résout une fois la saisie tranchée — `{ password,
+  // plaintext }` si le mot de passe est correct, `null` si l'utilisateur annule. Le
+  // déchiffrement est tenté DANS le gestionnaire du bouton "Déverrouiller" (pas ici) pour
+  // pouvoir réafficher une erreur et laisser le dialogue ouvert sur un mauvais mot de
+  // passe, sans effacer ce que l'utilisateur a tapé.
+  function promptForPassword(envelope) {
+    el('note-password-input').value = '';
+    el('note-password-error').hidden = true;
+    el('note-password-hide-toggle').checked = true;
+    applyPasswordVisibility('note-password-input', true);
+    el('note-password-dlg').showModal();
+    el('note-password-input').focus();
+    return new Promise(resolve => { _passwordPromptCtx = { resolve, envelope }; });
+  }
+
+  function cancelPasswordPrompt() {
+    const ctx = _passwordPromptCtx;
+    if (!ctx) return;
+    _passwordPromptCtx = null;
+    el('note-password-dlg').close();
+    ctx.resolve(null);
+  }
+
+  async function confirmPasswordPrompt() {
+    const ctx = _passwordPromptCtx;
+    if (!ctx) return;
+    const password = el('note-password-input').value;
+    if (!password) return;
+    el('note-password-confirm').disabled = true;
+    const plaintext = await NoteCrypto.decrypt(ctx.envelope, password);
+    el('note-password-confirm').disabled = false;
+    if (plaintext === null) {
+      el('note-password-error').hidden = false;
+      return; // dialogue reste ouvert, mot de passe déjà tapé conservé
+    }
+    _passwordPromptCtx = null;
+    el('note-password-dlg').close();
+    ctx.resolve({ password, plaintext });
+  }
+
+  // Bascule le champ entre `type="password"` (masqué) et `type="text"` (en clair) — coche
+  // "Masquer le mot de passe" partagée par les dialogues de mot de passe, cochée par
+  // défaut (comportement historique inchangé).
+  function applyPasswordVisibility(inputId, hidden) {
+    el(inputId).type = hidden ? 'password' : 'text';
+  }
+
+  // Le contenu tel qu'il doit être écrit sur le disque — rechiffré à la volée (nouveaux
+  // salt/nonce à chaque appel, jamais réutilisés, comme QOwnNotes) si la note est
+  // actuellement chiffrée ET qu'un mot de passe de session est connu ; identique à
+  // `content` sinon (note en clair, ou note chiffrée jamais déverrouillée cette session —
+  // voir `resolveDisplayContent`, le bloc chiffré traverse alors intact).
+  async function toDiskContent(content) {
+    if (!_isEncrypted || !_cryptoPassword) return content;
+    return NoteCrypto.encryptNoteText(content, _cryptoPassword, NoteCrypto.DEFAULT_ITERATIONS);
+  }
+
+  function openEncryptDialog() {
+    el('encrypt-note-password').value = '';
+    el('encrypt-note-confirm-password').value = '';
+    el('encrypt-note-mismatch').hidden = true;
+    el('encrypt-note-hide-toggle').checked = true;
+    applyPasswordVisibility('encrypt-note-password', true);
+    applyPasswordVisibility('encrypt-note-confirm-password', true);
+    el('encrypt-note-dlg').showModal();
+    el('encrypt-note-password').focus();
+  }
+
+  function confirmEncrypt() {
+    const password = el('encrypt-note-password').value;
+    const confirmPassword = el('encrypt-note-confirm-password').value;
+    if (!password || password !== confirmPassword) {
+      el('encrypt-note-mismatch').hidden = password === confirmPassword;
+      return;
+    }
+    el('encrypt-note-dlg').close();
+    _isEncrypted = true;
+    _cryptoPassword = password;
+    _dirty = true;
+    updateTitle();
+    updateEditorMenuVisibility();
+    scheduleAutosave();
+  }
+
+  function confirmDecrypt() {
+    el('decrypt-note-dlg').close();
+    _isEncrypted = false;
+    _cryptoPassword = null;
+    _dirty = true;
+    updateTitle();
+    updateEditorMenuVisibility();
+    scheduleAutosave();
+  }
+
   function updateTitle() {
     el('editor-title').textContent = _file ? (_file.name + (_dirty ? ' •' : '')) : '';
     el('editor-save-btn').disabled = !_dirty;
+    el('editor-encrypted-icon').hidden = !_isEncrypted;
   }
 
   function updateBacklinksBadge() {
@@ -695,9 +848,10 @@ const Editor = (() => {
     if (outcome === 'cancel' || outcome === 'reloaded') return; // 'reloaded' : plus rien de local à enregistrer
 
     const content = ta().value;
+    const diskContent = await toDiskContent(content);
     try {
       const writable = await _file.fileHandle.createWritable();
-      await writable.write(content);
+      await writable.write(diskContent);
       await writable.close();
     } catch (e) {
       alert(I18n.t('editor.saveFailed', { error: e.message }));
@@ -712,7 +866,12 @@ const Editor = (() => {
     }
     if (_repo) {
       try {
-        await Index.indexNote(_repo.id, _file, content);
+        // Indexe le contenu réellement écrit sur le disque (`diskContent`, pas le texte en
+        // clair) — cohérent avec l'indexation passive d'un dépôt entier (`Index.
+        // indexRepository`), qui ne voit jamais que les octets bruts du fichier et n'a de
+        // toute façon aucun mot de passe pour les déchiffrer. Sans effet sur le titre/zkId
+        // détectés (toujours dans les 1-2 premières lignes, restées en clair).
+        await Index.indexNote(_repo.id, _file, diskContent);
         const reindexed = Index.findByPath(_repo.id, _file.path);
         _zkId = reindexed ? reindexed.zkId : _zkId;
         updateBacklinksBadge();
@@ -733,15 +892,20 @@ const Editor = (() => {
   // l'utilisateur (Écraser / Recharger / Annuler).
 
   async function reloadFromDisk(file) {
-    const content = await file.text();
+    const rawContent = await file.text();
+    // Même résolution qu'à l'ouverture (`resolveDisplayContent`) : réutilise le mot de
+    // passe déjà connu s'il fonctionne encore, sinon (re)demande — annuler affiche le
+    // texte brut tel quel, comme à l'ouverture.
+    const content = await resolveDisplayContent(rawContent);
     ta().value = content;
     _baselineMtime = file.lastModified;
     _dirty = false;
     updateTitle();
+    updateEditorMenuVisibility();
     rehighlight();
     if (_repo) {
       try {
-        await Index.indexNote(_repo.id, _file, content);
+        await Index.indexNote(_repo.id, _file, rawContent);
         updateBacklinksBadge();
       } catch (e) {
         console.error('Échec de la réindexation après rechargement externe', e);
@@ -850,6 +1014,8 @@ const Editor = (() => {
     _dirty = false;
     _previewMode = false;
     _baselineMtime = null;
+    _isEncrypted = false;
+    _cryptoPassword = null;
     if (window.CSS && CSS.highlights) CSS.highlights.delete('ed-selection');
     hideTocSidebar();
     _distractionFree = false;
@@ -1133,6 +1299,11 @@ const Editor = (() => {
     el('editor-menu-insert-id').hidden = _previewMode;
     el('editor-menu-insert-link').hidden = _previewMode;
     el('editor-menu-goto-id').hidden = _previewMode;
+    // Chiffrer/déchiffrer : mutuellement exclusifs, indépendants du mode aperçu (comme
+    // Android — ces deux actions restent visibles en aperçu, contrairement à
+    // insert-id/insert-link/goto-id/search qui n'ont rien à faire dans un textarea caché).
+    el('editor-menu-encrypt').hidden = _isEncrypted;
+    el('editor-menu-decrypt').hidden = !_isEncrypted;
   }
 
   function runMenuAction(fn) {
@@ -1580,6 +1751,8 @@ const Editor = (() => {
     el('editor-menu-rename').innerHTML = `${Icons.edit()} ${I18n.t('common.rename')}`;
     el('editor-menu-backup-create').innerHTML = `${Icons.clock()} ${I18n.t('editor.createBackup')}`;
     el('editor-menu-backup-restore').innerHTML = `${Icons.restore()} ${I18n.t('editor.restoreBackup')}`;
+    el('editor-menu-encrypt').innerHTML = `${Icons.lock()} ${I18n.t('editor.encryptNoteTitle')}`;
+    el('editor-menu-decrypt').innerHTML = `${Icons.unlock()} ${I18n.t('editor.decryptNoteTitle')}`;
     el('editor-menu-settings').innerHTML = `${Icons.gear()} ${I18n.t('common.settings')}`;
     el('rename-note-confirm').innerHTML = `${Icons.save()} ${I18n.t('common.rename')}`;
     el('ed-ctx-follow-link').innerHTML = `${Icons.link()} ${I18n.t('editor.ctxFollowLink')}`;
@@ -1607,6 +1780,7 @@ const Editor = (() => {
     el('editor-backlinks-icon').innerHTML = Icons.link();
     el('editor-preview-btn').innerHTML = Icons.eye();
     el('editor-save-btn').innerHTML = Icons.save();
+    el('editor-encrypted-icon').innerHTML = Icons.lock();
     el('ed-distraction-exit-btn').innerHTML = Icons.minimize();
     refreshI18nLabels();
     document.addEventListener('i18n:apply', refreshI18nLabels);
@@ -1628,6 +1802,8 @@ const Editor = (() => {
     el('editor-menu-rename').addEventListener('click', runMenuAction(openRenameDialog));
     el('editor-menu-backup-create').addEventListener('click', runMenuAction(createBackupNow));
     el('editor-menu-backup-restore').addEventListener('click', runMenuAction(openBackupRestore));
+    el('editor-menu-encrypt').addEventListener('click', runMenuAction(openEncryptDialog));
+    el('editor-menu-decrypt').addEventListener('click', runMenuAction(() => el('decrypt-note-dlg').showModal()));
     el('editor-menu-settings').addEventListener('click', runMenuAction(() => Settings.open('editor-screen')));
 
     document.addEventListener('click', e => {
@@ -1809,6 +1985,22 @@ const Editor = (() => {
     el('rename-note-cancel').addEventListener('click', () => el('rename-note-dlg').close());
     el('rename-note-confirm').addEventListener('click', confirmRename);
     el('backup-restore-close').addEventListener('click', () => el('backup-restore-dlg').close());
+
+    el('note-password-cancel').addEventListener('click', cancelPasswordPrompt);
+    el('note-password-confirm').addEventListener('click', confirmPasswordPrompt);
+    el('note-password-dlg').addEventListener('cancel', e => { e.preventDefault(); cancelPasswordPrompt(); }); // Esc
+    el('note-password-hide-toggle').addEventListener('change', e => applyPasswordVisibility('note-password-input', e.target.checked));
+    el('note-password-input').addEventListener('keydown', e => { if (e.key === 'Enter') confirmPasswordPrompt(); });
+
+    el('encrypt-note-cancel').addEventListener('click', () => el('encrypt-note-dlg').close());
+    el('encrypt-note-confirm').addEventListener('click', confirmEncrypt);
+    el('encrypt-note-hide-toggle').addEventListener('change', e => {
+      applyPasswordVisibility('encrypt-note-password', e.target.checked);
+      applyPasswordVisibility('encrypt-note-confirm-password', e.target.checked);
+    });
+
+    el('decrypt-note-cancel').addEventListener('click', () => el('decrypt-note-dlg').close());
+    el('decrypt-note-confirm').addEventListener('click', confirmDecrypt);
 
     const respond = val => {
       const resolve = _closeConfirmResolve;

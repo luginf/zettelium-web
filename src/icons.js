@@ -158,5 +158,14 @@ const Icons = (() => {
     '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>' +
     '<line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>', size);
 
-  return { link, save, eye, eyeOff, edit, hash, clock, restore, wrench, tag, sort, gear, toc, trash, folder, search, copy, filePlus, crosshair, list, checkSquare, star, globe, droplet, maximize, minimize };
+  // Feather "lock" / "unlock" — notes chiffrées façon QOwnNotes (round 27 Android, ported
+  // ici) : `lock` pour l'indicateur de barre d'appli et l'entrée de menu "Chiffrer la
+  // note", `unlock` pour "Déchiffrer la note" — même réutilisation qu'Android
+  // (Icons.Filled.Lock / Icons.Filled.LockOpen).
+  const lock = (size = 18) => strokeSvg(
+    '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>', size);
+  const unlock = (size = 18) => strokeSvg(
+    '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>', size);
+
+  return { link, save, eye, eyeOff, edit, hash, clock, restore, wrench, tag, sort, gear, toc, trash, folder, search, copy, filePlus, crosshair, list, checkSquare, star, globe, droplet, maximize, minimize, lock, unlock };
 })();

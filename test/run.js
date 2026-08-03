@@ -21,6 +21,7 @@ const FILES = [
   'txt2tags/toc.js',
   'txt2tags/checklist.js',
   'zettelkasten.js',
+  'crypto.js',
   'editor-formatting.js',
   'math-eval.js',
   'tags.js',

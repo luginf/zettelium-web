@@ -91,9 +91,14 @@ const SExprEval = (() => {
     return fn(node.items.slice(1).map(evalNode));
   }
 
-  /** Partagé avec RpnEval/InfixEval pour un formatage identique quelle que soit la notation. */
+  /** Partagé avec RpnEval/InfixEval pour un formatage identique quelle que soit la notation.
+   *  Un résultat non entier est arrondi à 12 chiffres significatifs avant formatage — sans
+   *  ça, `String(n)` expose le bruit binaire résiduel d'une opération comme `3.5 - 3.2`
+   *  (stocké en mémoire comme `0.2999999999999998`, pas `0.3` exactement — limite inhérente
+   *  à IEEE 754 en JS comme ailleurs, pas un bug d'arrondi de ce code). */
   function formatNumber(n) {
-    return (n === Math.floor(n) && Math.abs(n) < 1e15) ? String(Math.trunc(n)) : String(n);
+    if (n === Math.floor(n) && Math.abs(n) < 1e15) return String(Math.trunc(n));
+    return String(Number(n.toPrecision(12)));
   }
 
   function evaluate(rawExpression) {
