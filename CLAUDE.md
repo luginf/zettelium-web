@@ -2312,6 +2312,173 @@ où fermer "la liste" n'aurait aucun sens (c'est le seul écran affiché).
   disparition du bouton au bon moment en changeant de note, de dépôt, ou en
   passant par les Réglages pendant que la liste est masquée.
 
+**Round 33 (2026-07-31, retour utilisateur) — marges du mode sans
+distraction visibles seulement en haut/à gauche, pas en bas/à droite** :
+cause réelle retrouvée par mesure directe (headless Brave + CDP), pas par
+déduction pure — le scénario exact reproduit était la liste de fichiers
+épinglée (round 19) combinée à un facteur de grossissement élevé (3-4),
+qui rétrécit beaucoup la largeur disponible de l'éditeur.
+- **Cause** : `#ed-input`/`#ed-highlight` sont en `position: absolute;
+  inset: 0; width: 100%; height: 100%` avec `box-sizing: border-box`
+  (reset global, style.css). Le modèle `border-box` NE PEUT PAS faire
+  rétrécir le padding en dessous de 0 — si le padding total (marge de base
+  × facteur, des deux côtés) dépasse la largeur/hauteur réellement
+  disponible de `#ed-main`, la boîte s'agrandit au-delà de `width:100%`/
+  `height:100%` pour faire de la place au padding. Comme `left`/`top`
+  restent fixés à 0 (`inset:0`), ce débordement ne peut se produire QUE
+  vers la DROITE/le BAS — la marge gauche/haut reste donc visible et
+  correcte, tandis que la marge droite/basse, bien réelle dans le CSS, se
+  retrouve poussée hors de la zone visible (voire hors de la fenêtre),
+  jamais atteignable en défilant. Confirmé par mesure : avec un panneau
+  épinglé large de 320px (fenêtre 1280px), `#ed-main` ne fait plus que
+  ~196px de large — avec `--ed-margin-x` à 160px (40×4) des deux côtés
+  (320px de padding total, plus que la largeur disponible elle-même), le
+  `<textarea>` mesurait 320px de large et débordait jusqu'à `right:1404px`
+  dans une fenêtre de seulement 1280px.
+- **Corrigé** : `applyEditorTypography()` (app.js, point d'entrée unique
+  déjà établi round 25) plafonne désormais chaque marge multipliée à 40 %
+  de la dimension ACTUELLE de `#ed-main` (largeur pour `--ed-margin-x`,
+  hauteur pour `--ed-margin-y`) — garantit au moins 20 % de largeur/hauteur
+  réservés au texte lui-même, quel que soit le facteur choisi. Mesuré à
+  CHAQUE appel (jamais mis en cache), donc reste correct après un
+  redimensionnement — deux nouveaux points d'appel ajoutés pour que le
+  plafond suive les changements de taille en direct : le listener
+  `window.resize` existant (editor.js, partagé avec `syncGutter`), et le
+  `mousemove` du glisser de redimensionnement du panneau de fichiers
+  épinglé (browser.js `wireSidebarResizer()`) — rétrécir le panneau agrandit
+  d'autant l'éditeur, sans ce rappel le plafond serait resté périmé jusqu'au
+  prochain déclencheur.
+- **Vérifié par reproduction automatisée** (headless Brave + CDP, même
+  scénario exact que celui qui révélait le bug — panneau épinglé étroit +
+  facteur 4) : avant le correctif, `#ed-input` débordait de 124px hors de
+  la fenêtre ; après, sa largeur correspond exactement à celle de `#ed-main`
+  (aucun débordement), et le padding gauche/droit reste parfaitement
+  symétrique (78.4px chacun, plafonné, au lieu des 160px non plafonnés qui
+  causaient le débordement) — la marge verticale (96px) n'a pas eu besoin
+  d'être plafonnée dans ce test (largeur du test suffisamment haute), preuve
+  que le plafond ne s'active que quand c'est nécessaire.
+- `make clean && make test` (198/198, inchangé — correction DOM/CSS, pas de
+  nouvelle logique pure). **Non vérifié avec une souris physique en
+  redimensionnant réellement une fenêtre** — la reproduction CDP couvre le
+  mécanisme de calcul lui-même (mesure directe des rects avant/après), pas
+  le geste physique de redimensionnement de fenêtre du système
+  d'exploitation ; à confirmer par l'utilisateur.
+
+**Round 34 (2026-08-01, retour utilisateur) — round 33 insuffisant : marge
+droite toujours pas triplée en mode sans distraction, marges verticales
+ignorées au défilement** : deux bugs RÉELS et DISTINCTS du plafonnement
+40% du round 33 (qui, lui, fonctionnait bien — confirmé en le re-testant),
+root-causés par reproduction automatisée (headless Brave + CDP, note de
+test à 40 titres, même méthodologie que les rounds précédents).
+- **Marge droite qui ne se met jamais à jour** : `syncGutter()` (déjà
+  existante, porte de writhdeck-web) pose un `paddingRight` INLINE sur
+  `#ed-highlight` (l'overlay visible) pour compenser la largeur de la
+  scrollbar du `<textarea>` invisible, afin que les deux éléments
+  retournent à la ligne au même endroit. Un style INLINE bat
+  inconditionnellement n'importe quelle règle de feuille de style, y
+  compris `padding: var(--ed-margin-y) var(--ed-margin-x)` — donc une fois
+  posé, ce `paddingRight` reste figé à sa valeur de calcul jusqu'au
+  prochain appel de `syncGutter()`. Or `syncGutter()` n'était appelée qu'à
+  la frappe (`rehighlight()`) et au redimensionnement de fenêtre — jamais
+  au **changement de mode sans distraction** (round 24) ni à un changement
+  de réglage de marge (Réglages > Éditeur) : la marge DROITE affichée
+  restait donc celle d'AVANT le changement (+ la largeur de la scrollbar),
+  jusqu'à ce que l'utilisateur tape un caractère quelconque — d'où
+  l'impression que "la marge = la marge normale", puisque c'est
+  littéralement le cas tant qu'aucune frappe n'a rafraîchi le calcul.
+  Marges gauche/haut/bas, elles, n'ont jamais cette inline override (posées
+  uniquement via la variable CSS), d'où l'asymétrie précise rapportée.
+- **Marges verticales "ignorées" au défilement, plus grave qu'un problème
+  cosmétique** : mesuré directement (note à 40 titres, `headingSizesEnabled`
+  actif par défaut) que `ta().scrollHeight` — qui pilote TOUT le
+  défilement, `pre()` ne fait que suivre via `syncScroll()` — peut être
+  RÉELLEMENT plus petit que la hauteur réelle du contenu affiché dans
+  `pre()`, puisque le vrai `<textarea>` ne peut avoir qu'une seule taille
+  de police uniforme alors que l'overlay agrandit chaque ligne de titre
+  (cause déjà bien documentée, rounds 13/20/20bis/20ter, mais jamais
+  jusqu'ici identifiée comme affectant la PLAGE de défilement elle-même,
+  seulement la position du curseur/de la sélection/du clic). Conséquence
+  mesurée : sur cette note de test, le déficit atteignait 128px — même en
+  défilant au maximum possible, la dernière ligne restait à moitié hors
+  champ, et aucune marge basse ne pouvait jamais apparaître, peu importe le
+  facteur de grossissement choisi (le déficit est en pixels absolus, fixe
+  pour un contenu donné — pas proportionnel au réglage de marge).
+  - **Piste explorée et écartée** : remapper `pre().scrollTop`
+    proportionnellement à `ta().scrollTop` (plutôt qu'une copie 1:1) aurait
+    résolu la plage totale atteignable, mais aurait cassé l'hypothèse "1
+    pixel de `ta().scrollTop` = 1 pixel de position réelle dans `pre()`"
+    sur laquelle reposent `pixelTopForOffset`/la navigation TOC/"Aller à
+    l'ID"/la recherche en note (rounds 20ter/28, très finement calibrés) —
+    risque de régression jugé disproportionné par rapport au correctif
+    ci-dessous, qui n'y touche pas.
+  - **Corrigé** (`syncVerticalCompensation()`, nouvelle fonction) en tirant
+    parti d'un comportement DÉJÀ correct, vérifié empiriquement avant
+    d'écrire le correctif : sur une note SANS titre, le vide sous la
+    dernière ligne au défilement maximal correspondait exactement à
+    `--ed-margin-y` — donc `padding-bottom` sur un `<textarea>` scrollable
+    EST bien inclus dans son `scrollHeight` par ce Chromium (pas de bug
+    générique de troncature de padding-bottom ici, contrairement à ce
+    qu'on aurait pu craindre). Le correctif ajoute donc le déficit manquant
+    (`pre().scrollHeight - ta().scrollHeight`, mesuré avec le
+    `paddingBottom` inline réinitialisé d'abord pour ne pas mesurer sa
+    propre correction précédente) comme `paddingBottom` SUPPLÉMENTAIRE sur
+    `ta()` (invisible de toute façon, `color: transparent`) — son
+    `scrollHeight` rattrape alors exactement celui, réel, de `pre()`,
+    rendant toute la plage de défilement de `pre()` atteignable via
+    `ta()`, SANS toucher au rapport 1:1 `ta().scrollTop` ↔ position réelle
+    qui protège tout le reste du code de positionnement. Vérifié que ce
+    correctif n'inflige PAS un gros vide au bas d'une note normale (hors
+    mode sans distraction) : le déficit en pixels est indépendant du
+    réglage de marge, donc `ta()` porte bien un `paddingBottom` gonflé
+    (ex. 224px avec marge de base 24px + déficit 200px), mais comme
+    `pre()` garde SON propre `paddingBottom` correct et non modifié
+    (24px), une fois `ta()` défilé à son nouveau maximum (qui correspond
+    numériquement au maximum réel de `pre()`), le vide RÉELLEMENT VISIBLE
+    sous la dernière ligne mesure bien 24px, pas 224px — confirmé par
+    mesure directe.
+  - **Limite assumée, non traitée ce round** : ce correctif répare la PLAGE
+    totale de défilement atteignable (donc la marge basse), mais pas la
+    dérive progressive de position visuelle À MI-DOCUMENT quand plusieurs
+    titres se sont déjà accumulés avant le point courant (le texte affiché
+    à une position de défilement donnée peut être légèrement "en retard"
+    par rapport à sa position réelle dans `pre()`) — limite déjà inhérente
+    à l'architecture (textarea à métriques uniformes + overlay à tailles
+    variables) et déjà documentée comme telle (voir le commentaire sur
+    `.heading-sizes` dans style.css) ; `headingSizesEnabled` reste
+    l'échappatoire existante pour l'éliminer entièrement à la source si
+    cette dérive s'avère gênante en usage réel.
+- **`syncGutter()` et `syncVerticalCompensation()` regroupées derrière un
+  point d'entrée unique `syncOverlayMetrics()`** (editor.js, exporté),
+  appelé depuis `rehighlight()` (remplace l'ancien appel direct à
+  `syncGutter()` seule) ET depuis `applyEditorTypography()` (app.js, à la
+  toute fin, après avoir posé les variables CSS) — un seul endroit
+  responsable de garder les deux éléments synchronisés après TOUT
+  changement de contenu ou de typographie, pour ne pas avoir à se souvenir
+  d'appeler les deux fonctions séparément à chaque nouveau site d'appel
+  (piège déjà rencontré une fois PENDANT ce round : le listener de
+  redimensionnement n'appelait que `syncGutter()`, jamais la compensation
+  verticale — simplifié en conséquence pour ne plus appeler que
+  `applyEditorTypography()`, qui gère maintenant les deux en interne).
+- **Vérifié par reproduction automatisée** (headless Brave + CDP, même note
+  de test à 40 titres) : marge droite de l'overlay correctement
+  recalculée immédiatement après bascule du mode sans distraction (135px =
+  120px de marge × 3 + 15px de compensation de scrollbar, au lieu de
+  rester figée à l'ancienne valeur) ; défilement au maximum en mode sans
+  distraction montre désormais exactement 72px sous la dernière ligne
+  (`--ed-margin-y` × 3), au lieu d'un contenu tronqué de 128px ; en mode
+  normal (marge de base), le même vide mesure exactement 24px, pas plus —
+  confirmant que la compensation ne fait que rattraper le déficit sans
+  gonfler la marge visible ; positionnement du curseur près de la fin du
+  document toujours cohérent après le correctif.
+- `make clean && make test` (198/198, inchangé — corrections
+  DOM/scroll/interaction réelles, pas de nouvelle logique pure testable en
+  Node). **Non vérifié avec une souris/molette physique** — la
+  reproduction CDP couvre le mécanisme de mesure et de défilement
+  programmatique lui-même, pas le geste physique de défilement continu (à
+  la molette/au trackpad) ; à confirmer par l'utilisateur, en particulier
+  sur une note réelle avec plusieurs dizaines de titres et un facteur de
+  marge élevé.
+
 ## Ne jamais faire
 
 - Ne jamais commiter au nom de l'utilisateur sans demande explicite.

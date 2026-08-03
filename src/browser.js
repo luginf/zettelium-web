@@ -901,6 +901,12 @@ const Browser = (() => {
       const rect = el('browser-screen').getBoundingClientRect();
       dragWidth = clamp(e.clientX - rect.left);
       document.documentElement.style.setProperty('--file-list-sidebar-width', dragWidth + 'px');
+      // Round 33 : rétrécir le panneau agrandit d'autant l'éditeur — sans
+      // ce rappel, le plafond des marges du mode sans distraction
+      // (calculé contre la largeur de #ed-main) resterait périmé jusqu'au
+      // prochain déclencheur (redimensionnement de fenêtre, bascule du
+      // mode) plutôt que de suivre le glisser en direct.
+      applyEditorTypography();
     });
 
     document.addEventListener('mouseup', () => {

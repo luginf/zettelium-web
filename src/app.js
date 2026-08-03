@@ -49,15 +49,55 @@ function applyTheme(schemeName = 'default', themeMode = 'system') {
 // quels, comportement historique inchangé. Point d'entrée UNIQUE pour les
 // marges (Réglages, toggle du mode sans distraction) : pas de logique de
 // grossissement dupliquée ailleurs.
+// Round 33 (retour utilisateur : marges du mode sans distraction visibles
+// seulement en haut/à gauche) — cause réelle, retrouvée par mesure directe
+// (headless + CDP) : `#ed-input`/`#ed-highlight` sont en `position:
+// absolute; inset:0; width:100%; height:100%` avec `box-sizing: border-box`
+// (reset global). Si le padding multiplié (marge × facteur, des DEUX
+// côtés) dépasse la largeur/hauteur RÉELLEMENT disponible de `#ed-main`
+// (facile à atteindre avec la liste de fichiers épinglée round 19, qui
+// rétrécit beaucoup l'éditeur, ou simplement une fenêtre pas très large),
+// `border-box` ne peut pas faire rétrécir le padding en dessous de 0 — au
+// lieu de ça, la boîte elle-même s'agrandit au-delà de `width:100%`/
+// `height:100%` pour faire de la place. Comme `left`/`top` restent fixés à
+// 0 (`inset:0`), ce débordement ne peut se produire QUE vers la droite/le
+// bas — d'où l'illusion que seules les marges haut/gauche "fonctionnent" :
+// la marge droite/basse existe bien dans le CSS, mais elle est poussée
+// hors de la zone visible (voire hors de la fenêtre), jamais visible ni
+// atteignable en défilant. Corrigé en plafonnant chaque marge à 40 % de la
+// dimension actuelle de `#ed-main` (garantit au moins 20 % de largeur/
+// hauteur réservés au texte lui-même, quel que soit le facteur choisi) —
+// mesuré à CHAQUE appel (pas mis en cache), donc reste correct après un
+// redimensionnement de fenêtre ou du panneau de fichiers épinglé (voir les
+// appels supplémentaires dans editor.js/browser.js).
+// Round 34 (retour utilisateur : marge droite toujours pas triplée, marges
+// verticales ignorées au défilement) — `Editor.syncOverlayMetrics()` DOIT
+// être rappelée à la fin de cette fonction : `#ed-highlight` porte un
+// `paddingRight` INLINE (posé par `syncGutter()`, pour compenser la
+// largeur de la scrollbar du textarea) qui bat inconditionnellement la
+// règle CSS `padding: var(--ed-margin-y) var(--ed-margin-x)` ci-dessus —
+// changer la variable seule ne suffit donc pas, l'inline reste périmé tant
+// que `syncGutter()` n'est pas rappelée. Voir aussi
+// `syncVerticalCompensation()` (editor.js) pour la marge basse/le
+// défilement, un problème distinct (déficit de `scrollHeight` entre le
+// textarea à métriques uniformes et l'overlay aux titres agrandis).
 function applyEditorTypography() {
   const root = document.documentElement.style;
   const s = State.settings;
   const marginFactor = Editor.isDistractionFree() ? Math.max(1, s.distractionFreeMarginFactor || 1) : 1;
+  let marginX = s.editorMarginX * marginFactor;
+  let marginY = s.editorMarginY * marginFactor;
+  const main = document.getElementById('ed-main');
+  if (main && main.clientWidth > 0 && main.clientHeight > 0) {
+    marginX = Math.min(marginX, main.clientWidth * 0.4);
+    marginY = Math.min(marginY, main.clientHeight * 0.4);
+  }
   root.setProperty('--ed-font-family', s.editorFontFamily);
   root.setProperty('--ed-font-size', s.editorFontSize + 'px');
-  root.setProperty('--ed-margin-x', (s.editorMarginX * marginFactor) + 'px');
-  root.setProperty('--ed-margin-y', (s.editorMarginY * marginFactor) + 'px');
+  root.setProperty('--ed-margin-x', marginX + 'px');
+  root.setProperty('--ed-margin-y', marginY + 'px');
   root.setProperty('--ed-line-spacing', String(s.editorLineSpacing));
+  Editor.syncOverlayMetrics();
 }
 
 // Injecte le CSS de la prévisualisation dans une balise <style> dédiée

@@ -250,7 +250,7 @@ const Editor = (() => {
   function rehighlight() {
     const searchVisible = !el('ed-search-bar').hidden;
     pre().innerHTML = Highlight.highlight(ta().value, searchVisible ? _searchTerm : '');
-    syncGutter();
+    syncOverlayMetrics();
     updateSelectionHighlight();
     updateCaretIndicator();
   }
@@ -534,12 +534,82 @@ const Editor = (() => {
 
   // Compensates for the textarea's scrollbar width so both elements wrap
   // text at the same width — ported from writhdeck-web's syncGutter().
+  // Sets an INLINE `paddingRight` on `pre()`, which then permanently beats
+  // the CSS custom-property-driven `padding: var(--ed-margin-y)
+  // var(--ed-margin-x)` shorthand rule (inline style always wins over any
+  // stylesheet rule, regardless of what the rule references) — so this
+  // must be re-run any time `--ed-margin-x` changes, not just on input/
+  // resize, or the inline value goes stale (round 34: toggling
+  // distraction-free mode changed the CSS var but nothing re-ran this,
+  // leaving `pre()`'s right margin stuck at the pre-toggle value + gutter
+  // — see `syncOverlayMetrics()` below, the single call site now
+  // responsible for re-running this after every margin-affecting change).
   function syncGutter() {
     const input = ta();
     const hl = pre();
     const gutter = input.offsetWidth - input.clientWidth;
     const baseRight = parseFloat(getComputedStyle(input).paddingRight) || 0;
     hl.style.paddingRight = (baseRight + gutter) + 'px';
+  }
+
+  // Compense le déficit de hauteur entre le vrai `<textarea>` (métriques de
+  // police UNIFORMES, ne peut pas avoir de ligne plus haute qu'une autre) et
+  // l'overlay `#ed-highlight` (lignes de titre agrandies quand
+  // `headingSizesEnabled`) — round 34, retour utilisateur : "les marges
+  // verticales sont ignorées... si on scrolle cela ne 'sort' pas avant
+  // d'atteindre le haut". Sans compensation, `ta().scrollHeight` (calculé
+  // par le navigateur à partir des métriques uniformes du textarea) peut
+  // être RÉELLEMENT plus petit que `pre().scrollHeight` (qui, lui, reflète
+  // les titres agrandis) — or c'est `ta().scrollTop`/`scrollHeight` qui
+  // pilote tout le défilement (`pre()` ne fait que suivre via
+  // `syncScroll()`), donc la fin du document (et la marge basse qui
+  // devrait apparaître en dessous) devient purement et simplement
+  // inatteignable en défilant, pas seulement visuellement décalée. Vérifié
+  // par mesure directe (headless + CDP) : sur une note de test à 40 titres,
+  // le déficit mesurait 128px, et la dernière ligne restait à moitié hors
+  // champ même en défilant au maximum.
+  // Le correctif tire parti d'un comportement DÉJÀ correct et vérifié
+  // empiriquement : `padding-bottom` sur un `<textarea>` scrollable EST
+  // bien inclus dans son `scrollHeight` par ce Chromium (testé sur une note
+  // sans titre : le vide sous la dernière ligne au défilement max
+  // correspondait exactement à `--ed-margin-y`, aucun bug générique de
+  // troncature de padding-bottom ici) — on ajoute donc simplement le
+  // déficit manquant comme padding-bottom SUPPLÉMENTAIRE sur `ta()`
+  // (invisible de toute façon, `color: transparent`), pour que son
+  // `scrollHeight` rattrape celui, réel, de `pre()`. Réinitialise le style
+  // inline avant de mesurer `baseBottom` — sinon le déficit d'un appel
+  // précédent serait inclus dans la mesure et s'accumulerait à chaque appel
+  // au lieu de rester stable.
+  // Limite assumée, non traitée ici : ceci corrige la PLAGE totale de
+  // défilement atteignable (et donc la marge basse) mais pas la dérive
+  // progressive de position VISUELLE à mi-document quand plusieurs titres
+  // se sont déjà accumulés avant le point courant (le texte affiché à une
+  // position de défilement donnée peut être légèrement "en retard" par
+  // rapport à ce à quoi on s'attendrait) — limite déjà documentée comme
+  // inhérente à l'architecture (textarea à métriques uniformes + overlay à
+  // tailles variables), avec `headingSizesEnabled` comme échappatoire
+  // existante pour l'éliminer entièrement à la source si besoin.
+  function syncVerticalCompensation() {
+    const input = ta();
+    const hl = pre();
+    input.style.paddingBottom = '';
+    const baseBottom = parseFloat(getComputedStyle(input).paddingBottom) || 0;
+    const deficit = Math.max(0, hl.scrollHeight - input.scrollHeight);
+    input.style.paddingBottom = (baseBottom + deficit) + 'px';
+  }
+
+  // Point d'entrée unique pour tout ce qui doit être recalculé après un
+  // changement de contenu OU de typographie (police/taille/marges/mode sans
+  // distraction) — appelé depuis `rehighlight()` (à chaque frappe) et
+  // depuis `applyEditorTypography()` (app.js, à chaque changement de
+  // réglage affectant les marges). Un seul point d'appel exporté plutôt que
+  // deux fonctions séparées à synchroniser manuellement à chaque site
+  // d'appel (piège déjà rencontré une fois ce round : le listener de
+  // redimensionnement n'appelait que `syncGutter()`, jamais la compensation
+  // verticale).
+  function syncOverlayMetrics() {
+    syncGutter();
+    syncVerticalCompensation();
   }
 
   function syncScroll() {
@@ -1588,7 +1658,13 @@ const Editor = (() => {
         searchOpen();
       }
     });
-    window.addEventListener('resize', syncGutter);
+    // `applyEditorTypography()` (round 33) : replafonne les marges du mode
+    // sans distraction à la taille actuelle de `#ed-main` à chaque
+    // redimensionnement de la fenêtre — sinon un plafond calculé une seule
+    // fois (à l'activation) resterait périmé si la fenêtre change de taille
+    // ensuite. Elle appelle elle-même `syncOverlayMetrics()` en fin de
+    // course (round 34) — pas besoin de l'appeler ici en plus.
+    window.addEventListener('resize', () => { applyEditorTypography(); });
 
     el('ed-search-input').addEventListener('input', searchUpdate);
     el('ed-search-prev').addEventListener('click', searchPrev);
@@ -1774,5 +1850,5 @@ const Editor = (() => {
     return _file ? _file.path : null;
   }
 
-  return { init, open, openOther, requestClose, currentPath, isDistractionFree, hideFileListSidebar };
+  return { init, open, openOther, requestClose, currentPath, isDistractionFree, hideFileListSidebar, syncOverlayMetrics };
 })();
