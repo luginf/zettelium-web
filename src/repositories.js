@@ -18,15 +18,62 @@ const Repositories = (() => {
   // ne touche jamais cette variable, seul `onCustomColorInput()` le fait).
   let _lastCustomColor = null;
 
+  // --- Recherche depuis l'accueil (round 28, comme zettelium-android :
+  // SearchScreen atteignable sans dépôt ambiant) — toujours cross-dépôt
+  // (aucun dépôt "actif" ici), donc pas de bascule de portée comme
+  // #browser-search-scope-btn : voir Browser.renderFileRow (browser.js)
+  // pour le `crossRepo` qui en découle. Variable de session pure, comme
+  // `Browser._searchMode` : jamais persistée, retombe sur 'name' à chaque
+  // rechargement. -----------------------------------------------------
+  let _searchMode = 'name';
+
+  function updateSearchBarVisibility() {
+    el('repo-search-bar').hidden = State.repositories.length <= 1;
+  }
+
+  function renderSearchResults() {
+    const list = el('repo-list');
+    list.innerHTML = '';
+    const query = el('repo-search-input').value.trim();
+    el('repo-search-clear-btn').hidden = !query;
+    const q = query.toLowerCase();
+    const results = Index.entriesAllRepos()
+      .filter(e => Browser.matchesQuery(e, _searchMode, q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    el('repo-empty-hint').hidden = results.length > 0;
+    el('repo-empty-hint').textContent = I18n.t('browser.emptyHintNoResults');
+    const jumpTerm = _searchMode === 'content' ? query : undefined;
+    results.forEach(file => {
+      const row = Browser.renderFileRow(file, jumpTerm, true);
+      // `renderFileRow`'s own click handler bascule le dépôt actif et ouvre
+      // l'éditeur (`Editor.openOther`), mais celui-ci ne touche jamais
+      // `repo-screen` (seulement `browser-screen`/`editor-screen` — voir
+      // `Editor.open`) : sans ceci, l'écran d'accueil resterait visible à
+      // côté de l'éditeur (même piège que `showList()` avec l'ancien
+      // `editor-screen` orphelin, voir son commentaire plus haut).
+      row.addEventListener('click', () => { el('repo-screen').hidden = true; });
+      list.appendChild(row);
+    });
+  }
+
   function render() {
     const list = el('repo-list');
     list.innerHTML = '';
+    updateSearchBarVisibility();
+
+    const query = el('repo-search-input').value.trim();
+    if (query && !el('repo-search-bar').hidden) {
+      renderSearchResults();
+      return;
+    }
+    el('repo-search-clear-btn').hidden = true;
 
     if (!State.repositories.length) {
       el('repo-empty-hint').hidden = false;
       return;
     }
     el('repo-empty-hint').hidden = true;
+    el('repo-empty-hint').textContent = I18n.t('repo.emptyHint');
 
     State.repositories.forEach((repo, idx) => {
       const item = document.createElement('div');
@@ -136,6 +183,12 @@ const Repositories = (() => {
     if (!repo) return;
     await setColorTag(repo, hex);
     render();
+    // Round "inventaire d'UI comparable" : ce picker est maintenant aussi accessible depuis
+    // "Options du dépôt" (`browser.js`, `Repositories.openColorPicker` exporté) — sans ce
+    // second appel, la teinte de l'en-tête du navigateur (`applyRepoColorTint`, dans
+    // `Browser.render()`) resterait périmée jusqu'au prochain changement de dossier. Sans
+    // effet si `browser-screen` n'est pas affiché (mêmes éléments DOM, juste cachés).
+    Browser.render();
   }
 
   // Couleur personnalisée (round 22, groupée à part sous "Aucune couleur",
@@ -258,11 +311,36 @@ const Repositories = (() => {
     document.body.classList.remove('sticky-workspace-active');
     el('repo-screen').hidden = false;
     render();
+    // Recherche depuis l'accueil (round 28) : interroge Index.entriesAllRepos(),
+    // qui ne connaît que les dépôts déjà indexés au moins une fois cette
+    // session (Browser.openActive()/reindexAllRepos()) - sans ce déclenchement,
+    // la recherche resterait silencieusement vide tant qu'aucun dépôt n'a
+    // été ouvert. Pas attendu, même compromis "résultats partiels qui se
+    // complètent" que reindexAllRepos()/reindexActive() côté navigateur.
+    if (State.repositories.length > 1) Browser.reindexAllRepos();
   }
 
   function init() {
     el('repo-add-btn').addEventListener('click', addViaPicker);
     renderColorSwatches();
+
+    el('repo-search-input').addEventListener('input', render);
+    el('repo-search-clear-btn').addEventListener('click', () => {
+      el('repo-search-input').value = '';
+      el('repo-search-input').focus();
+      render();
+    });
+    for (const btn of document.querySelectorAll('#repo-search-mode button')) {
+      btn.addEventListener('click', () => {
+        _searchMode = btn.dataset.mode;
+        for (const b of document.querySelectorAll('#repo-search-mode button')) b.classList.toggle('active', b === btn);
+        el('repo-search-input').placeholder = I18n.t(
+          _searchMode === 'content' ? 'browser.searchPlaceholderContent'
+          : _searchMode === 'tag' ? 'browser.searchPlaceholderTag'
+          : 'browser.searchPlaceholderName');
+        render();
+      });
+    }
     el('repo-color-close').addEventListener('click', closeColorPicker);
     el('repo-color-none').addEventListener('click', () => pickColor(null));
     el('repo-color-custom-swatch').addEventListener('click', openCustomColorPicker);
@@ -273,7 +351,15 @@ const Repositories = (() => {
     // descendre, retirer) sont reconstruits par render() lui-même — un
     // simple nouveau rendu suffit à les rafraîchir sur changement de langue.
     document.addEventListener('i18n:apply', render);
+    // Recherche depuis l'accueil (round 28) - voir le même appel dans
+    // showList() : nécessaire ici aussi pour le tout premier écran affiché
+    // au chargement de l'appli (repo-screen, visible par défaut - showList()
+    // n'est jamais appelée à ce moment-là).
+    if (State.repositories.length > 1) Browser.reindexAllRepos();
   }
 
-  return { init, render, showList };
+  // `openColorPicker` exporté (round "inventaire d'UI comparable", demande explicite de
+  // l'utilisateur) — réutilisé depuis `browser.js` pour "Couleur du dépôt" dans "Options du
+  // dépôt", en plus de son point d'entrée existant sur l'écran liste des dépôts.
+  return { init, render, showList, openColorPicker };
 })();

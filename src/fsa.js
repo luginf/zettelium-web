@@ -43,6 +43,14 @@ const FSA = (() => {
   // zettelium-android's `SafRepositoryAccess.BACKUPS_DIR_NAME`.
   const BACKUPS_DIR_NAME = 'backups';
 
+  // Directory name where JS plugin scripts live (plugins.js) — used by
+  // `Plugins.list` to find the folder, but, unlike BACKUPS_DIR_NAME, NOT
+  // excluded from browsing/indexing below: a "neutral" folder, editable
+  // like any other (explicit request). Matches zettelium-android's
+  // `SafRepositoryAccess.PLUGINS_DIR_NAME` — see
+  // ~/src/zettelium/zettelium-plugins/CLAUDE.md.
+  const PLUGINS_DIR_NAME = 'plugins';
+
   // Lists the note files AND subfolders directly inside `dirHandle` — one
   // level, no recursion (phase 6: subfolder navigation in the browser, see
   // browser.js's `State.dirStack`). `path` is repo-relative (`prefix + name`,
@@ -167,6 +175,6 @@ const FSA = (() => {
     supported, pickDirectory, queryPermission, requestPermission,
     isNoteFileName, listChildren, listNoteFilesRecursive, readFileText,
     getParentDirHandle, renameFile, writeNewFile, createNoteFile, deleteFile,
-    BACKUPS_DIR_NAME
+    BACKUPS_DIR_NAME, PLUGINS_DIR_NAME
   };
 })();

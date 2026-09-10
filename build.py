@@ -32,6 +32,7 @@ JS_ORDER = [
     'index.js',
     'themes.js',
     'backup.js',
+    'plugins.js',
     'repositories.js',
     'settings.js',
     'theme-editor.js',

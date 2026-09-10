@@ -9,3 +9,6 @@ Thumbs.db
 # Python (build.py is run as a script, not imported, but ignore defensively)
 __pycache__/
 *.pyc
+
+# Sortie générée par test/ui-inventory.js (round 40) — artefact jetable, pas du code source.
+test/ui-inventory-output/

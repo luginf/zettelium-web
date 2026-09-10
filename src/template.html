@@ -17,6 +17,20 @@
     <button id="repo-settings-btn" data-i18n-title="common.settings" class="icon-btn"></button>
     <button id="repo-add-btn" data-i18n-title="repo.addTooltip" data-i18n="repo.addButton"></button>
   </div>
+  <!-- Recherche depuis l'accueil (round 28, comme zettelium-android :
+       SearchScreen atteignable sans dépôt ambiant) - masquée avec 0 ou 1
+       dépôt (rien de plus à chercher qu'en ouvrant ce dépôt), toujours
+       cross-dépôt (pas de portée "ce dépôt", il n'y a pas de dépôt actif
+       ici). -->
+  <div id="repo-search-bar" hidden>
+    <div id="repo-search-mode">
+      <button data-mode="name" class="active" data-i18n="browser.searchName"></button>
+      <button data-mode="content" data-i18n="browser.searchContent"></button>
+      <button data-mode="tag" data-i18n="browser.searchTag"></button>
+    </div>
+    <input type="text" id="repo-search-input" data-i18n-placeholder="browser.searchPlaceholderName" autocomplete="off">
+    <button id="repo-search-clear-btn" data-i18n-title="browser.clearSearchTooltip" class="icon-btn" hidden>✕</button>
+  </div>
   <p id="repo-empty-hint" class="hint" data-i18n="repo.emptyHint" hidden></p>
   <div id="repo-list"></div>
   <p class="hint" id="repo-support-hint"></p>
@@ -157,6 +171,12 @@
       <input type="text" id="settings-id-format" autocomplete="off">
     </label>
     <p id="settings-id-preview" class="hint"></p>
+
+    <p class="settings-section-title" data-i18n="settings.sectionPlugins"></p>
+    <label class="settings-row"><span data-i18n="settings.globalPluginsRepoLabel"></span>
+      <select id="settings-global-plugins-repo"></select>
+    </label>
+    <p class="hint" data-i18n="settings.globalPluginsRepoHelp"></p>
   </div>
 </div>
 
@@ -213,11 +233,14 @@
     <button id="browser-back-btn" data-i18n-title="browser.backTooltip">←</button>
     <span id="browser-title"></span>
     <button id="browser-refresh-btn" data-i18n-title="browser.refreshTooltip">⟳</button>
+    <!-- Toujours visible — unification du mécanisme "nouvelle note" avec
+         android/desktop (round "inventaire d'UI comparable", demande
+         explicite de l'utilisateur), plus caché derrière le menu "⋮". -->
+    <button id="browser-new-note-btn" data-i18n-title="browser.newNoteTitle" class="icon-btn"></button>
     <div id="browser-menu-wrap">
       <button id="browser-menu-btn" data-i18n-title="browser.moreTooltip">⋮</button>
       <div id="browser-menu" hidden>
         <button id="browser-menu-repo-options" class="icon-label-btn action-row"></button>
-        <button id="browser-menu-new-note" class="icon-label-btn action-row"></button>
         <button id="browser-menu-settings" class="icon-label-btn action-row"></button>
       </div>
     </div>
@@ -272,6 +295,17 @@
       </span>
       <span class="switch"><input type="checkbox" id="repo-options-include-extension"><span class="switch-track"></span></span>
     </label>
+
+    <hr class="dialog-hr">
+
+    <!-- "Couleur du dépôt"/"Retirer le dépôt" — round "inventaire d'UI comparable", demande
+         explicite de l'utilisateur : unifié avec android/desktop, jusqu'ici accessibles
+         seulement depuis l'écran liste des dépôts. -->
+    <button id="repo-options-color" class="icon-label-btn action-row"></button>
+
+    <hr class="dialog-hr">
+
+    <button id="repo-options-remove" class="icon-label-btn action-row"></button>
   </div>
 </dialog>
 
@@ -307,6 +341,7 @@
             <button id="editor-menu-rename" class="icon-label-btn"></button>
             <button id="editor-menu-backup-create" class="icon-label-btn"></button>
             <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
+            <button id="editor-menu-plugins" class="icon-label-btn"></button>
             <button id="editor-menu-encrypt" class="icon-label-btn"></button>
             <button id="editor-menu-decrypt" class="icon-label-btn"></button>
             <button id="editor-menu-settings" class="icon-label-btn"></button>
@@ -451,6 +486,18 @@
   <div id="backup-restore-list"></div>
 </dialog>
 
+<!-- Greffons JS (voir ~/src/zettelium/zettelium-plugins/CLAUDE.md, première version) —
+     scripts trouvés dans le sous-dossier "plugins/" du dépôt, exécutés sur le contenu
+     actuel de la note dans un Worker isolé (voir plugins.js). -->
+<dialog id="plugins-dlg">
+  <div id="plugins-header">
+    <span data-i18n="editor.pluginsTitle"></span>
+    <button id="plugins-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <p id="plugins-empty-hint" class="hint" data-i18n="editor.pluginsEmptyHint" hidden></p>
+  <div id="plugins-list"></div>
+</dialog>
+
 <!-- Notes chiffrées façon QOwnNotes (round 27 Android, porté ici) : demande le mot de
      passe d'une note chiffrée détectée à l'ouverture. Annuler n'exclut pas de la note
      (round 38 Android) : affiche le contenu brut (titre en clair + bloc chiffré intact)
@@ -558,7 +605,6 @@
     <button id="note-actions-close" data-i18n-title="common.close">✕</button>
   </div>
   <div id="note-actions-body">
-    <button id="note-actions-favorite" class="icon-label-btn action-row"></button>
     <button id="note-actions-rename" class="icon-label-btn action-row"></button>
     <button id="note-actions-move" class="icon-label-btn action-row"></button>
     <button id="note-actions-duplicate" class="icon-label-btn action-row"></button>

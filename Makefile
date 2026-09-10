@@ -4,7 +4,7 @@ JS_SRCS := src/schemes.js src/icons.js src/i18n.js src/storage.js src/fsa.js \
            src/txt2tags/toc.js src/txt2tags/checklist.js \
            src/zettelkasten.js src/crypto.js src/editor-formatting.js src/math-eval.js src/tags.js src/ini.js \
            src/state.js src/highlight.js src/index.js \
-           src/themes.js src/backup.js \
+           src/themes.js src/backup.js src/plugins.js \
            src/repositories.js src/settings.js src/theme-editor.js \
            src/browser.js src/editor.js src/app.js
 

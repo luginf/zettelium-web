@@ -120,6 +120,24 @@ const Settings = (() => {
     }
   }
 
+  // Dépôt dont le sous-dossier `plugins/` est proposé en plus de celui du dépôt courant
+  // (`Editor.openPluginsDialog`) — évite de dupliquer un greffon dans chaque dépôt, même
+  // réglage que zettelium-android (`AppSettings.globalPluginsRepositoryId`).
+  function populateGlobalPluginsRepoOptions() {
+    const select = el('settings-global-plugins-repo');
+    select.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = I18n.t('settings.globalPluginsRepoNone');
+    select.appendChild(none);
+    for (const repo of State.repositories) {
+      const option = document.createElement('option');
+      option.value = repo.id;
+      option.textContent = repo.name;
+      select.appendChild(option);
+    }
+  }
+
   function sync() {
     syncRadioGroup('settings-theme-mode', State.settings.themeMode);
     populateSchemeOptions();
@@ -148,6 +166,9 @@ const Settings = (() => {
     el('settings-id-pattern').value = State.settings.idPattern;
     el('settings-id-format').value = State.settings.idGenerationFormat;
     updateIdPreview();
+
+    populateGlobalPluginsRepoOptions();
+    el('settings-global-plugins-repo').value = State.settings.globalPluginsRepositoryId || '';
   }
 
   // Aperçu en direct : l'ID que produirait le format de génération actuel,
@@ -226,7 +247,12 @@ const Settings = (() => {
     el('settings-back-btn').addEventListener('click', close);
     // `updateIdPreview()` construit un texte dynamique (I18n.t) — pas
     // couvert par le sweep `data-i18n` générique, statique.
-    document.addEventListener('i18n:apply', () => { if (!el('settings-screen').hidden) updateIdPreview(); });
+    document.addEventListener('i18n:apply', () => {
+      if (el('settings-screen').hidden) return;
+      updateIdPreview();
+      populateGlobalPluginsRepoOptions();
+      el('settings-global-plugins-repo').value = State.settings.globalPluginsRepositoryId || '';
+    });
 
     el('settings-editor-font').addEventListener('change', e => setEditorFontFamily(e.target.value));
     const renderFontSize = wireStepper('settings-font-size',
@@ -272,6 +298,10 @@ const Settings = (() => {
     el('settings-id-format').addEventListener('input', async e => {
       await setIdGenerationFormat(e.target.value);
       updateIdPreview();
+    });
+
+    el('settings-global-plugins-repo').addEventListener('change', e => {
+      setGlobalPluginsRepositoryId(e.target.value || null);
     });
   }
 

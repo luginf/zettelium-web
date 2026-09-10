@@ -123,7 +123,17 @@ const State = {
     // ini.js) : du CSS multi-lignes ne survivrait pas au format `clé =
     // valeur`, même raisonnement que `favorites`/`cursors`/`colorTag`
     // (IndexedDB seul).
-    previewCustomCss: ''
+    previewCustomCss: '',
+
+    // Dépôt dont le sous-dossier `plugins/` est proposé en plus de celui du
+    // dépôt courant (`Editor.openPluginsDialog`) — évite de dupliquer un
+    // greffon dans chaque dépôt, même réglage que zettelium-android
+    // (`AppSettings.globalPluginsRepositoryId`). `null` = aucun dépôt
+    // désigné. Un `id` de dépôt est un UUID généré à l'ajout
+    // (`crypto.randomUUID()`, `addRepository`) qui ne survivrait pas à une
+    // purge/ré-ajout — volontairement absent de l'export durable
+    // `zettelium.ini`, IndexedDB seul, même raisonnement que `colorTag`.
+    globalPluginsRepositoryId: null
   }
 };
 
@@ -238,7 +248,7 @@ async function loadState() {
   const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, themeMode,
     language, editorFontFamily, editorFontSize, editorMarginX, editorMarginY, editorLineSpacing, autosaveEnabled,
     tocSidebarMode, fileListSidebarMode, fileListSidebarWidth, headingSizesEnabled, distractionFreeMarginFactor,
-    previewCustomCss] = await Promise.all([
+    previewCustomCss, globalPluginsRepositoryId] = await Promise.all([
     Storage.getAllRepositories(),
     Storage.getMeta('noteExtensions'),
     Storage.getMeta('noteExtensionsFilterDisabled'),
@@ -259,7 +269,8 @@ async function loadState() {
     Storage.getMeta('fileListSidebarWidth'),
     Storage.getMeta('headingSizesEnabled'),
     Storage.getMeta('distractionFreeMarginFactor'),
-    Storage.getMeta('previewCustomCss')
+    Storage.getMeta('previewCustomCss'),
+    Storage.getMeta('globalPluginsRepositoryId')
   ]);
   State.repositories = (repos || []).sort((a, b) => a.order - b.order);
   State.favorites = new Set(await Storage.getAllFavorites());
@@ -286,6 +297,7 @@ async function loadState() {
   if (headingSizesEnabled !== undefined) State.settings.headingSizesEnabled = headingSizesEnabled;
   if (distractionFreeMarginFactor !== undefined) State.settings.distractionFreeMarginFactor = distractionFreeMarginFactor;
   if (previewCustomCss !== undefined) State.settings.previewCustomCss = previewCustomCss;
+  if (globalPluginsRepositoryId !== undefined) State.settings.globalPluginsRepositoryId = globalPluginsRepositoryId;
 
   // Re-verify permission on every repository without prompting — a prompt
   // requires a user gesture, done on demand via reauthorizeRepository().
@@ -560,6 +572,13 @@ async function setPreviewCustomCss(value) {
   State.settings.previewCustomCss = value;
   await Storage.setMeta('previewCustomCss', value);
   applyPreviewCss();
+}
+
+// Pas de scheduleDurableExport() ici — voir le commentaire sur
+// `globalPluginsRepositoryId` plus haut, volontairement absent de l'export .ini.
+async function setGlobalPluginsRepositoryId(value) {
+  State.settings.globalPluginsRepositoryId = value;
+  await Storage.setMeta('globalPluginsRepositoryId', value);
 }
 
 // --- Favoris (round 28 Android) ---------------------------------------------

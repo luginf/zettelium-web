@@ -2577,6 +2577,300 @@ du bloc chiffré, et surtout l'interopérabilité avec une note RÉELLEMENT chif
 QOwnNotes lui-même restent à confirmer par l'utilisateur — mêmes réserves que le round 27
 côté Android. `make clean && make test` passe (209/209, +8 pour `crypto.js`).
 
+**Round 37 (2026-08-03) — première version d'un système de greffons JS** : demande
+explicite ("un peu comme le fait KOReader"), étude complète (Lua vs WASM vs JS, voir
+`~/src/zettelium/zettelium-plugins/CLAUDE.md`) puis implémentation d'une v1 minimale le même
+jour, en parallèle avec `zettelium-android` (même contrat de greffon des deux côtés — c'est
+là que vit l'historique complet du comparatif de langages, pas dupliqué ici).
+- **Contrat du greffon** : un fichier `.js` dans le nouveau sous-dossier `plugins/` du dépôt
+  (exclu de la navigation/l'indexation comme `backups/` — `FSA.PLUGINS_DIR_NAME`, même
+  exclusion ajoutée à `listChildren`/`listNoteFilesRecursive`) assigne un objet global
+  `Plugin` avec une fonction `action(text)` qui reçoit le texte complet de la note et
+  renvoie le texte transformé.
+- **`src/plugins.js`** (nouveau) : `Plugins.list(repo)` scanne `plugins/` (même technique
+  que `Backup.list` — `getDirectoryHandle` puis itération, `[]` si le dossier n'existe pas
+  encore). `Plugins.runAction(source, text)` exécute le script dans un **Web Worker créé
+  depuis une URL Blob** (pas de fichier séparé à servir — cohérent avec le `zettelium.html`
+  autonome), via un `eval` INDIRECT (`(0, eval)(source)`, assigne `Plugin` dans la portée
+  globale DU WORKER, isolée de la page) ; timeout de 5s pour qu'un greffon qui boucle ne
+  bloque pas l'éditeur. **Asymétrie notée avec Android** : un Worker garde un accès réseau
+  (`fetch`/`XMLHttpRequest`) par défaut, contrairement à QuickJS côté Android qui n'a aucune
+  capacité ambiante — limite connue, pas traitée dans cette v1 (voir le CLAUDE.md des
+  greffons, section "Questions ouvertes").
+- **UI** : nouvelle entrée "Greffons" dans le menu "⋮", juste après "Restaurer une
+  sauvegarde" (`#plugins-dlg`, calqué sur `#backup-restore-dlg`) — clic sur un greffon
+  l'exécute sur `ta().value` puis charge le résultat via `replaceAllContent` (marque
+  `dirty`, ne sauvegarde pas directement — même choix qu'Android, l'utilisateur garde la
+  main via "Enregistrer").
+- **Hors périmètre v1** (noté dans le CLAUDE.md des greffons, pas oublié) : cycle de vie
+  automatique (onOpen/onSave), entrée dans le menu contextuel du clic droit, stockage propre
+  au greffon, extension du parseur txt2tags.
+- 4 nouvelles clés i18n × 2 langues (211 au total FR/EN, toujours strictement synchronisées).
+
+`make clean && make test` passe (209/209, inchangé — `plugins.js` dépend de `Worker`/`Blob`/
+FSA, non testable sous `node:test` comme `backup.js`/`browser.js`/`editor.js`, même limite
+déjà documentée). **Vérifié** : chargement headless Chrome sans exception JS,
+`#plugins-dlg`/`#editor-menu-plugins` bien présents dans le DOM rendu. **Pas de test
+fonctionnel réel** (choisir un dossier via FSA nécessite un vrai geste utilisateur) — à
+confirmer par l'utilisateur : écrire un greffon `plugins/majuscules.js` dans un dépôt réel,
+vérifier qu'il apparaît dans le menu et transforme bien le texte de la note ouverte.
+
+**Round 38 (2026-08-04) — greffons : insertion au curseur** : miroir du round 40 côté
+`zettelium-android` (voir son CLAUDE.md pour le détail complet), suite à un retour utilisateur
+sur l'exemple `date-du-jour.js` (fichier PARTAGÉ entre les deux plateformes, round 37) — "je
+veux que cela s'insère au curseur" plutôt qu'à la fin de la note. Contrat étendu de façon
+rétrocompatible (documenté dans `~/src/zettelium/zettelium-plugins/CLAUDE.md`).
+- **`Plugin.action(text, cursor)`** : `Plugins.runAction(source, text, cursor)` transmet
+  désormais la position du curseur au Worker (`self.onmessage`, `Plugin.action(text,
+  cursor)`) — un greffon écrit pour la v1 initiale (un seul paramètre `text`) continue de
+  fonctionner sans changement, un argument positionnel surnuméraire n'a aucun effet en JS.
+- **`Plugins.CURSOR_MARKER = '{{cursor}}'`/`Plugins.stripCursorMarker(result, fallbackCursor)`**
+  (nouveau, `plugins.js`) : même convention qu'Android (`PLUGIN_CURSOR_MARKER`/
+  `stripPluginCursorMarker`, `PluginCursor.kt`) — un greffon peut inclure ce marqueur UNE FOIS
+  dans le texte renvoyé pour indiquer où repositionner le curseur ; absent, le curseur retombe
+  sur sa position d'avant l'exécution (comportement historique).
+- **`editor.js`, `openPluginsDialog`** : remplace `replaceAllContent(result)` (qui sélectionnait
+  tout le texte puis l'`execCommand('insertText')` remplaçait — le curseur finissait
+  systématiquement en FIN de note, sans position ciblée) par `applyFormattingResult({rangeStart:
+  0, rangeEnd: <ancienne longueur>, replacement: <texte sans marqueur>, cursorStart/cursorEnd:
+  <position calculée>})` — même helper que `formatHeading`/`formatBold`/etc. (menu contextuel de
+  mise en forme), qui passe déjà par `execCommand('insertText')` pour s'intégrer à l'undo natif
+  du navigateur puis positionne explicitement la sélection.
+- **`examples/date-du-jour.js` mis à jour** (le même fichier sert aux deux plateformes) :
+  découpe `text` à `cursor`, insère le titre daté entre les deux moitiés, place `"{{cursor}}"`
+  juste après pour que le curseur retombe à cet endroit précis après application.
+
+`make all` (bundle) et `node test/run.js` (209 tests, inchangé — `plugins.js` reste hors
+périmètre `node:test`) passent ; chargement headless Chrome du bundle reconstruit sans erreur
+JS. `./gradlew compileDebugKotlin testDebugUnitTest assembleDebug` passe côté Android (217
+tests, +4). **Non testé fonctionnellement sur navigateur/device réel par Claude** — à confirmer
+par l'utilisateur avec `date-du-jour.js` réinstallé dans un dépôt réel : le curseur doit se
+retrouver juste après le titre inséré, pas en fin de note.
+
+**Round 39 (2026-08-11) - recherche depuis l'accueil + extrait de contenu
+sous le nom de fichier** : deux retours utilisateur groupés (via le
+portage Tcl, qui ajoutait les deux mêmes fonctions ce jour-là - voir
+CLAUDE.md tcl rounds 6/8) - "je veux également pouvoir faire une recherche
+depuis la page d'accueil" (comme zettelium-android, `SearchScreen`
+atteignable sans dépôt ambiant) et "un extrait du contenu recherché en
+dessous du nom du fichier".
+
+- **Recherche depuis l'accueil** (`repositories.js`) : nouvelle barre de
+  recherche Nom/Contenu/Tag dans `#repo-screen` (`#repo-search-bar`,
+  masquée avec 0-1 dépôt - rien à chercher de plus qu'en ouvrant ce dépôt),
+  toujours cross-dépôt (pas de bascule de portée comme
+  `#browser-search-scope-btn` : il n'y a pas de dépôt "actif" à cet
+  endroit). Réutilise `Browser.matchesQuery`/`Browser.renderFileRow` plutôt
+  que de dupliquer le matching et le rendu de ligne - a nécessité de
+  paramétrer `matchesQuery(entry, mode, q)` (au lieu de lire `_searchMode`,
+  variable privée du module Browser) et `renderFileRow(file, searchTerm,
+  crossRepo)` (`crossRepo` généralise l'ancien test `_searchScope ===
+  'all'` : affiche le nom du dépôt, masque le menu d'actions - vrai pour la
+  recherche "tous les dépôts" du navigateur ET, toujours, pour la
+  recherche depuis l'accueil). `Editor.open()` ne masque jamais
+  `repo-screen` lui-même (seulement `browser-screen`/`editor-screen`) -
+  sans le masquer explicitement au clic sur un résultat, il serait resté
+  visible à côté de l'éditeur (même piège que celui déjà documenté dans
+  `showList()` pour `editor-screen`). `Index.entriesAllRepos()` ne connaît
+  que les dépôts déjà indexés au moins une fois cette session -
+  `Browser.reindexAllRepos()` (déjà utilisée par la portée "tous les
+  dépôts" du navigateur) désormais aussi déclenchée (en arrière-plan, pas
+  attendue) à l'arrivée sur l'écran d'accueil s'il y a plus d'un dépôt,
+  sinon la recherche resterait silencieusement vide tant qu'aucun dépôt
+  n'a été ouvert.
+- **Extrait de contenu** (`browser.js`, `contentExcerpt`) : fenêtre de
+  contexte asymétrique centrée sur la première occurrence de la requête (30
+  caractères avant, le reste après - le terme reste proche du début de
+  l'extrait), points de suspension aux deux bouts si tronqué. Affiché sous
+  le nom de fichier (`renderFileRow` restructuré : nom + extrait empilés
+  dans un nouveau `.file-item-main` en colonne, la ligne meta
+  date/dossier/dépôt reste à côté comme avant) - seulement en mode
+  recherche par contenu (un extrait de contenu n'a pas de sens en mode
+  nom/tag, déjà visibles dans le nom de la ligne). Même logique/réglages
+  que `zk-content-excerpt` côté Tcl (round 8 tcl) - vérifiées avec les
+  MÊMES données de test dans les deux langages (node/tclsh), résultats
+  identiques caractère pour caractère.
+
+**Vérifié** : `node -c` sur les 3 fichiers touchés (syntaxe), `node
+test/run.js` (209 tests, inchangé - `browser.js`/`repositories.js`/
+`index.js` restent hors périmètre `node:test`, dépendent du DOM/de la File
+System Access API qu'un test Node headless ne peut pas fournir).
+`contentExcerpt` vérifiée isolément dans Node avec les mêmes cas que
+`zk-content-excerpt` (match au milieu avec troncature des deux côtés,
+contenu court retourné intégralement sans points de suspension, aucun
+match, match sans rien avant). **Le reste (chaînage `repo-screen` ->
+recherche -> ouverture d'une note -> fermeture -> retour à l'accueil, rendu
+DOM réel de `.file-item-main`/`.file-item-excerpt`) n'a pas pu être testé
+de bout en bout par Claude** - `browser.js`/`repositories.js` dépendent du
+DOM et de la File System Access API (accès disque réel via un geste
+utilisateur), hors de portée d'un test Node headless ; à vérifier par
+l'utilisateur dans Chrome/Edge avec un dépôt réel, comme le reste des
+changements DOM de ce projet (`make debug` puis ouvrir `zettelium.html`).
+
+**Round 40 (2026-09-01) — pilote d'un inventaire d'UI comparable Android/desktop/web (dump
+de l'arbre d'accessibilité CDP) : première extraction DOM/FSA réellement automatisée de
+bout en bout depuis Node headless**. Demande explicite de l'utilisateur, suite au même
+pilote côté `zettelium-desktop` (dump `SemanticsNode` Compose, la même famille d'API
+d'accessibilité/tests). Contredit partiellement la limite notée juste au-dessus (round 39,
+"hors de portée d'un test Node headless") : pas une contradiction en fait, seulement le
+one-off round 19bis (voir plus haut) qui n'avait jamais été transformé en outil réutilisable
+— fait ici.
+
+- **`test/ui-inventory.js`** (nouveau, ~230 lignes) : même technique CDP brute que le round
+  19bis — PAS de Puppeteer/Playwright (convention déjà établie), client CDP écrit à la main
+  sur le `WebSocket` global de Node 22 (`node --version` confirmé : v22.23.1, disponible).
+  Lance un Brave headless (`--headless=new --no-sandbox --user-data-dir=<tmp>`), charge
+  `zettelium.html` en `file://`, construit un harnais (`dirHandle`/`fileHandle` factices —
+  la vraie File System Access API ne peut pas être automatisée en headless, aucun geste
+  utilisateur possible pour son sélecteur) injecté via `Runtime.evaluate` (le contexte de
+  la console DevTools : `State`/`Editor`/`FSA` sont directement accessibles, ce sont des
+  `const` de premier niveau sans modules ES — voir build.py), appelle `Editor.open()`, puis
+  dump `Accessibility.getFullAXTree()` dans `test/ui-inventory-output/web-EditorScreen.txt`.
+- **Piège découvert et corrigé en le testant** : un faux `dirHandle`/`fileHandle` avec des
+  méthodes ne peut PAS passer par le vrai `addRepository()` (persistance IndexedDB via
+  structured clone, qui rejette les fonctions) — injection directe dans `State.repositories`/
+  `State.activeRepositoryId` à la place, sans jamais appeler la vraie fonction de
+  persistance (un inventaire d'UI n'a besoin d'aucune vraie sauvegarde).
+- **Piège de process qui ne rendait jamais la main** : le premier essai réussissait (fichier
+  bien écrit) mais le process Node restait accroché indéfiniment après - Chromium lance
+  plusieurs sous-process (zygote/gpu/renderer/crashpad) qui ne meurent pas tous de façon
+  fiable en tuant seulement le PID direct du navigateur. Corrigé par `spawn(..., {detached:
+  true})` + `process.kill(-browser.pid, 'SIGKILL')` (tue le GROUPE de process, pas juste le
+  PID) + `process.exit()` explicite en fin de script.
+- **Piège d'interprétation de `ignored` dans l'arbre d'accessibilité, découvert sur les
+  VRAIES données (pas supposé)** : un nœud `ignored=true` n'implique PAS que ses
+  descendants le sont aussi — le wrapper racine de toute l'appli est lui-même `ignored`
+  (probablement un simple `<div>` sans rôle ARIA propre) alors que tout son contenu, éditeur
+  compris, est exposé normalement en dessous. Le premier filtrage (élaguer tout le
+  sous-arbre d'un nœud `ignored`) faisait donc disparaître la totalité du contenu utile —
+  corrigé en ne filtrant que l'AFFICHAGE du nœud `ignored` lui-même, tout en continuant
+  TOUJOURS à descendre dans ses enfants à la même indentation. Un sous-arbre réellement sans
+  rien d'exposé (l'écran de dépôts caché derrière l'éditeur) ne produit alors aucune ligne
+  naturellement, sans avoir besoin de le savoir à l'avance. Filtrage additionnel des
+  `InlineTextBox` (détail d'implémentation Chrome, toujours une feuille dupliquant le nom de
+  son parent `StaticText`/`LineBreak`, jamais d'information supplémentaire).
+- **Vérifié en l'exécutant réellement** (pas juste en le lisant) : `297` nœuds bruts ->
+  `68` lignes après filtrage, contenu confirmé lisible et correct — toute la barre d'appli
+  de l'éditeur (`Table des matières`/`Notes qui font un lien vers celle-ci`/`Aperçu`/
+  `Enregistrer (Ctrl+S)`, désactivé car rien à sauvegarder/`⋮`) et le texte réel de la note
+  de test, découpé en `StaticText`/`LineBreak` cohérents avec le contenu source. Termine en
+  ~0,6s, aucun process résiduel après (vérifié par `ps aux`).
+- **Limite connue, pas creusée ce round** : l'écran de la liste des dépôts (vide, "Aucun
+  dépôt enregistré...") apparaît encore dans le dump aux côtés de l'éditeur, pas caché comme
+  en usage normal (`editor.js` masque normalement `#browser-screen` à l'ouverture d'une
+  note) — le harnais minimal de ce pilote ne reproduit sans doute pas exactement toutes les
+  conditions du vrai flux d'ouverture (ex. `State.settings` jamais chargé via `loadState()`).
+  Sans conséquence pour la validation du MÉCANISME (l'éditeur lui-même est bien exposé
+  correctement), mais à garder à l'esprit si ce script sert un jour à autre chose qu'un
+  inventaire structurel approximatif.
+
+**Round 41 (2026-09-06) — extension du pilote d'inventaire d'UI à `BrowserScreen`/
+`SettingsScreen` + deux corrections d'unification réelles** : suite explicite du round 40,
+après comparaison de la barre d'outils de `EditorScreen` sur les 3 plateformes (quasi
+identique, rien à corriger) — étendre l'inventaire à d'autres écrans, puis agir sur les
+vrais écarts trouvés (même round côté `zettelium-android` #49 et `zettelium-desktop` #9,
+voir leurs journaux respectifs pour le détail desktop/Android).
+
+- **`test/ui-inventory-browser.js`/`test/ui-inventory-settings.js`** (nouveaux, même
+  technique CDP brute que `ui-inventory.js` round 40 — dupliqués plutôt que factorisés,
+  aucun mécanisme de module partagé dans ce projet). `Repositories.open(repo)` n'étant PAS
+  exporté (`return { init, render, showList }`), son corps est reproduit directement dans le
+  harnais du script Browser plutôt que d'exporter une fonction interne juste pour un script
+  exploratoire.
+- **Piège de timing découvert en le vivant, propre à ce harnais minimal** : le premier essai
+  du script Browser affichait les boutons "Nom"/"Contenu"/"#Tag" du navigateur SANS AUCUN
+  nom accessible (alors que les mêmes boutons, ailleurs sur la page d'accueil, en avaient
+  un dans le dump round 40) — pas un bug de l'appli : `I18n.apply()` (qui remplit ces
+  `data-i18n` vides) tourne normalement APRÈS le vrai flux `App.init()`/`loadState()` async
+  (lecture IndexedDB), jamais garanti terminé dans ce harnais qui ne passe jamais par ce
+  flux. Corrigé par un rappel explicite et idempotent de `I18n.apply()` en fin de harnais,
+  plutôt que de deviner un délai à attendre.
+- **Comparaison croisée avec les dumps équivalents desktop (round 9)/Android (round 48/49) —
+  écarts réels trouvés, décision utilisateur sur lesquels corriger** :
+  - Bouton "Rafraîchir" présent ici (⟳) et sur desktop, absent d'Android — pas un écart côté
+    web, non traité ici.
+  - "Nouvelle note" caché derrière le menu "⋮" (`browser-menu-new-note`) alors que desktop/
+    Android l'ont toujours visible — **corrigé** : nouveau bouton `#browser-new-note-btn`
+    (icône `Icons.filePlus()`) toujours visible dans `#browser-header`, entrée retirée du
+    menu "⋮" (devenue redondante).
+  - "Ajouter aux favoris" : trois mécanismes différents sur les 3 plateformes (desktop :
+    bouton étoile toujours visible ; Android : clic long sans aucune affordance visible ;
+    web : dans le menu "⋮" par ligne + étoile passive, round 28 Android) — **unifié sur le
+    mécanisme desktop**, seule option qui rend l'action visible ET immédiate (un seul tap,
+    sans ouvrir de dialogue). `renderFileRow` (`browser.js`) expose maintenant un
+    `<button class="icon-btn file-item-favorite">` toujours visible et cliquable
+    (`toggleFavorite(fileRepositoryId, path)` — fonctionne aussi sur un résultat cross-dépôt,
+    ce paramètre n'exige pas le dépôt actif). L'entrée "favori" du menu "⋮" par note
+    (`note-actions-favorite`, `updateFavoriteActionLabel`, `toggleFavoriteFromActions`) est
+    supprimée avec son bouton HTML — devenue redondante. Clé i18n `browser.favoriteIndicator`
+    (devenue orpheline) retirée des deux langues.
+
+`node test/run.js` → 209/209 tests inchangés. `node test/ui-inventory-browser.js` re-vérifié
+après chaque correctif (bouton "Nouvelle note" puis "Ajouter aux favoris" bien présents et
+nommés dans le dump). `make` (build minifié de production) re-testé aussi — pas seulement
+`make debug`.
+
+**Round 42 (2026-09-06, même journée) — "couleur du dépôt"/"retirer le dépôt" dans "Options
+du dépôt"** : suite directe du round 41, demande explicite de l'utilisateur ("dans tous les
+modes, dans options du dépôt, rajoute aussi les 2 options précédentes"). Les deux actions
+existaient déjà (accessibles seulement depuis l'écran liste des dépôts, `repositories.js`)
+— ce round les rend AUSSI accessibles sans quitter le dépôt qu'on est en train de
+parcourir, comme android/desktop.
+
+- **`Repositories.openColorPicker` exporté** (jusqu'ici interne à l'IIFE, `return { init,
+  render, showList }`) — réutilisé depuis `browser.js` plutôt que dupliqué. Sans export
+  équivalent nécessaire pour "retirer" : `removeRepository(id)`/`Repositories.showList()`
+  sont déjà des fonctions globales (pas de module ES dans ce projet, voir convention
+  établie) ou déjà exportées.
+- **Piège trouvé en le codant, pas en le vivant** : `Repositories.pickColor` (appelé par le
+  color picker) ne rafraîchissait que l'écran liste des dépôts (`Repositories.render()`) —
+  sans y ajouter aussi `Browser.render()`, la teinte de l'en-tête du navigateur
+  (`applyRepoColorTint`, dans `Browser.render()`) serait restée périmée jusqu'au prochain
+  changement de dossier si la couleur est changée depuis ce NOUVEAU point d'entrée (à
+  l'intérieur du dépôt, pas depuis la liste). `Browser.render()` est un no-op sûr si
+  `browser-screen` n'est pas affiché (mêmes éléments DOM, juste cachés) — safe à appeler
+  inconditionnellement.
+- **`removeRepositoryFromOptions`** : même garde-fou "enregistrer avant de quitter"
+  (`Editor.requestClose()`) que `Browser.backOrUp()` — une note ouverte (et non
+  enregistrée) de CE dépôt peut encore être dans le panneau épinglé au moment où on le
+  retire depuis "Options du dépôt".
+- Deux nouveaux boutons dans `#repo-options-dlg` (`repo-options-color`/`repo-options-remove`),
+  libellés construits avec icône via `refreshI18nLabels()` (`Icons.droplet()`/`Icons.trash()`
+  + `repo.colorTooltip`/`repo.removeTooltip`, clés déjà existantes — réutilisées, pas
+  dupliquées) — même style que "Réparer les liens", le seul autre bouton icône+texte déjà
+  dans ce dialogue.
+- **Vérification** : dumps `ui-inventory-browser.js` déjà couverts par le round 41 (toolbar/
+  lignes), mais "Options du dépôt" lui-même n'est qu'un `<dialog>` ouvert à la demande, hors
+  de la portée de ce script — vérifié séparément par un harnais CDP ad hoc (jetable, pas
+  ajouté à `test/`) : clic sur "Couleur du dépôt" ouvre bien `#repo-color-dlg`, clic sur
+  "Retirer le dépôt" (avec `window.confirm` stubbé) retire bien le dépôt de `State
+  .repositories`. Piège de harnais rencontré et documenté au passage (pas un bug produit) :
+  un délai artificiel avant d'interagir avec la page laisse le temps au VRAI flux
+  `App.init()`/`loadState()` (asynchrone, tourne toujours en parallèle d'un harnais minimal)
+  d'écraser le dépôt factice injecté avant `loadState()` — ré-injecter l'état factice APRÈS
+  avoir laissé le temps aux écouteurs de s'enregistrer contourne le problème pour un script
+  ad hoc, sans rapport avec le fonctionnement réel de l'appli.
+
+`node test/run.js` → 209/209 tests inchangés. `make`/`make debug` re-testés.
+
+**Round 43 (2026-09-10) — parité avec les 3 mêmes améliorations Android (round 51 de son
+HISTORY.md) : `plugins/` navigable, dépôt de greffons partagés, `Plugin.name` affiché** :
+- **`plugins/` n'est plus exclu de la navigation/l'indexation** (`fsa.js`,
+  `listChildren`/`listNoteFilesRecursive`) — seul `backups/` reste exclu.
+- **Dépôt de greffons partagés** (`State.settings.globalPluginsRepositoryId`, nouvelle
+  section Réglages "Greffons") : `Editor.collectPluginFiles` fusionne `plugins/` du dépôt
+  courant avec celui du dépôt désigné (courant prioritaire si même nom de fichier). `id` de
+  dépôt étant un UUID généré côté client, volontairement absent de l'export `zettelium.ini`
+  (même raisonnement que `colorTag`).
+- **Menu "Greffons" affiche `Plugin.name`** : `Plugins.readName(source)` (nouveau,
+  `plugins.js`) lit la propriété via le même Worker sandboxé que `runAction`, sans exécuter
+  `action` — repli sur le nom de fichier si absent/invalide.
+
+Vérifié : `node --check` sur les fichiers touchés, `make clean && make` (build), `node
+test/run.js` (209/209, inchangé — ce round touche FSA/Worker/DOM, pas de logique pure
+nouvelle), dump `Accessibility.getFullAXTree` (`test/ui-inventory-settings.js`) confirmant
+la section "Greffons"/le sélecteur affichés dans le DOM rendu.
+
 ## Ne jamais faire
 
 - Ne jamais commiter au nom de l'utilisateur sans demande explicite.
@@ -2588,3 +2882,10 @@ côté Android. `make clean && make test` passe (209/209, +8 pour `crypto.js`).
   motif change, `.trim()` sur le motif d'ID, `LinkRepair` en O(N) par note
   pas O(N×M)) — le journal `../zettelium-android/CLAUDE.md` (rounds
   12/12bis/12ter/16) documente ces corrections en détail.
+- En pilotant un navigateur headless via CDP (`test/ui-inventory.js`, round 40) : toujours
+  `spawn(..., {detached: true})` + tuer le GROUPE de process (`process.kill(-pid, ...)`),
+  jamais juste le PID direct — Chromium/Brave lance plusieurs sous-process qui survivent
+  sinon indéfiniment. Et ne jamais supposer qu'un nœud `Accessibility.getFullAXTree`
+  `ignored=true` a des descendants forcément ignorés eux aussi — vérifié faux (le wrapper
+  racine de l'appli est lui-même `ignored`) : ne filtrer que l'affichage du nœud, jamais
+  élaguer tout son sous-arbre sans vérifier.

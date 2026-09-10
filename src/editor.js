@@ -1739,6 +1739,76 @@ const Editor = (() => {
     el('backup-restore-dlg').showModal();
   }
 
+  // --- Greffons JS (voir ~/src/zettelium/zettelium-plugins/CLAUDE.md, première version) ---
+
+  // Fusionne les greffons du dépôt courant avec ceux du dépôt "source partagée" désigné
+  // dans les réglages (`State.settings.globalPluginsRepositoryId`, voir settings.js) — évite
+  // de dupliquer un greffon dans chaque dépôt, même mécanisme qu'Android
+  // (`EditorViewModel.loadPlugins`). Dépôt courant prioritaire en cas de nom identique.
+  async function collectPluginFiles() {
+    const local = await Plugins.list(_repo);
+    const globalId = State.settings.globalPluginsRepositoryId;
+    if (!globalId || globalId === _repo.id) return local;
+    const globalRepo = State.repositories.find(r => r.id === globalId);
+    if (!globalRepo) return local;
+    const remote = await Plugins.list(globalRepo);
+    const localNames = new Set(local.map(p => p.name));
+    return [...local, ...remote.filter(p => !localNames.has(p.name))].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async function openPluginsDialog() {
+    if (!_repo) return;
+    const files = await collectPluginFiles();
+    // `Plugin.name` (lu via `Plugins.readName`, même sandbox Worker que l'exécution) affiché
+    // à la place du nom de fichier, repli sur celui-ci si absent/invalide — même repli
+    // qu'Android (`PluginHost.readName`).
+    const plugins = await Promise.all(files.map(async file => {
+      const source = await FSA.readFileText(file.fileHandle);
+      const displayName = await Plugins.readName(source);
+      return { ...file, source, displayName: displayName || file.name };
+    }));
+    const list = el('plugins-list');
+    list.innerHTML = '';
+    el('plugins-empty-hint').hidden = plugins.length > 0;
+
+    for (const plugin of plugins) {
+      const item = document.createElement('div');
+      item.className = 'plugins-item';
+      item.textContent = plugin.displayName;
+      // Exécute le greffon sur le contenu ACTUEL de la note (à partir de la position du
+      // curseur) dans un Worker isolé (voir `Plugins.runAction`), puis applique le résultat
+      // comme une frappe normale (`applyFormattingResult` : marque `dirty`, ne sauvegarde
+      // pas directement — même choix qu'Android, `EditorViewModel.runPlugin`) : l'utilisateur
+      // garde la main via "Enregistrer" et les garde-fous existants. Le résultat brut peut
+      // porter `Plugins.CURSOR_MARKER` (voir `plugins.js`) pour repositionner le curseur avec
+      // précision plutôt que le laisser en fin de note (comportement par défaut d'un
+      // remplacement intégral) — même mécanisme qu'Android
+      // (`stripPluginCursorMarker`/`applyFormatting`).
+      item.addEventListener('click', async () => {
+        el('plugins-dlg').close();
+        const input = ta();
+        const cursor = input.selectionStart;
+        const rangeEnd = input.value.length;
+        const raw = await Plugins.runAction(plugin.source, input.value, cursor);
+        if (raw === null) {
+          alert(I18n.t('editor.pluginFailed'));
+          return;
+        }
+        const { text, cursor: newCursor } = Plugins.stripCursorMarker(raw, cursor);
+        const clamped = Math.min(Math.max(newCursor, 0), text.length);
+        applyFormattingResult({
+          rangeStart: 0,
+          rangeEnd,
+          replacement: text,
+          cursorStart: clamped,
+          cursorEnd: clamped,
+        });
+      });
+      list.appendChild(item);
+    }
+    el('plugins-dlg').showModal();
+  }
+
   // Libellés construits avec une icône — pas couverts par le sweep
   // `data-i18n` générique (statique) ; rappelés à l'init et sur
   // l'évènement `i18n:apply` (changement de langue en direct, voir i18n.js).
@@ -1751,6 +1821,7 @@ const Editor = (() => {
     el('editor-menu-rename').innerHTML = `${Icons.edit()} ${I18n.t('common.rename')}`;
     el('editor-menu-backup-create').innerHTML = `${Icons.clock()} ${I18n.t('editor.createBackup')}`;
     el('editor-menu-backup-restore').innerHTML = `${Icons.restore()} ${I18n.t('editor.restoreBackup')}`;
+    el('editor-menu-plugins').innerHTML = `${Icons.wrench()} ${I18n.t('editor.plugins')}`;
     el('editor-menu-encrypt').innerHTML = `${Icons.lock()} ${I18n.t('editor.encryptNoteTitle')}`;
     el('editor-menu-decrypt').innerHTML = `${Icons.unlock()} ${I18n.t('editor.decryptNoteTitle')}`;
     el('editor-menu-settings').innerHTML = `${Icons.gear()} ${I18n.t('common.settings')}`;
@@ -1802,6 +1873,7 @@ const Editor = (() => {
     el('editor-menu-rename').addEventListener('click', runMenuAction(openRenameDialog));
     el('editor-menu-backup-create').addEventListener('click', runMenuAction(createBackupNow));
     el('editor-menu-backup-restore').addEventListener('click', runMenuAction(openBackupRestore));
+    el('editor-menu-plugins').addEventListener('click', runMenuAction(openPluginsDialog));
     el('editor-menu-encrypt').addEventListener('click', runMenuAction(openEncryptDialog));
     el('editor-menu-decrypt').addEventListener('click', runMenuAction(() => el('decrypt-note-dlg').showModal()));
     el('editor-menu-settings').addEventListener('click', runMenuAction(() => Settings.open('editor-screen')));
@@ -1985,6 +2057,7 @@ const Editor = (() => {
     el('rename-note-cancel').addEventListener('click', () => el('rename-note-dlg').close());
     el('rename-note-confirm').addEventListener('click', confirmRename);
     el('backup-restore-close').addEventListener('click', () => el('backup-restore-dlg').close());
+    el('plugins-close').addEventListener('click', () => el('plugins-dlg').close());
 
     el('note-password-cancel').addEventListener('click', cancelPasswordPrompt);
     el('note-password-confirm').addEventListener('click', confirmPasswordPrompt);
