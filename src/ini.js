@@ -15,6 +15,7 @@ const INI = (() => {
     note_extensions:                 ['noteExtensions', 'str'],
     note_extensions_filter_disabled: ['noteExtensionsFilterDisabled', 'bool'],
     note_sort_order:                 ['noteSortOrder', 'str'],
+    note_sort_favorites_first:       ['noteSortFavoritesFirst', 'bool'],
     id_pattern:                      ['idPattern', 'str'],
     id_generation_format:            ['idGenerationFormat', 'str'],
     scheme:                          ['scheme', 'str'],
@@ -31,6 +32,7 @@ const INI = (() => {
     file_list_sidebar_width:         ['fileListSidebarWidth', 'int'],
     heading_sizes_enabled:           ['headingSizesEnabled', 'bool'],
     distraction_free_margin_factor:  ['distractionFreeMarginFactor', 'int'],
+    search_accent_sensitive:         ['searchAccentSensitive', 'bool'],
     // `previewCustomCss` (round 25) est délibérément absent : du CSS
     // multi-lignes ne survivrait pas au format `clé = valeur` de ce
     // fichier — IndexedDB seul (voir state.js).

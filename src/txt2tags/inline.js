@@ -48,6 +48,8 @@ const Txt2TagsInline = (() => {
       Link(parse(m.groups.label ?? ''), m.groups.link ?? ''));
     consider(Txt2TagsRegexes.img, Txt2TagsRegexes.img.exec(text), m =>
       Image(m.groups.path ?? ''));
+    consider(Txt2TagsRegexes.markdownImg, Txt2TagsRegexes.markdownImg.exec(text), m =>
+      Image(m.groups.path ?? ''));
     consider(Txt2TagsRegexes.link, Txt2TagsRegexes.link.exec(text), m =>
       Link([Text(m[0])], m[0]));
     consider(Txt2TagsRegexes.fontMono, Txt2TagsRegexes.fontMono.exec(text), m => Mono(m[1]));

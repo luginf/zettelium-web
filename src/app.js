@@ -146,8 +146,10 @@ async function init() {
   Repositories.init();
   Settings.init();
   ThemeEditor.init();
+  Tabs.init();
   Browser.init();
   Editor.init();
+  await Repositories.restoreLastNote();
 
   // Réévalue le thème si l'OS change de mode clair/sombre pendant que l'app
   // est ouverte — seulement pertinent en mode 'system' (voir resolveDarkMode).

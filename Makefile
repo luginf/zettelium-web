@@ -6,7 +6,7 @@ JS_SRCS := src/schemes.js src/icons.js src/i18n.js src/storage.js src/fsa.js \
            src/state.js src/highlight.js src/index.js \
            src/themes.js src/backup.js src/plugins.js \
            src/repositories.js src/settings.js src/theme-editor.js \
-           src/browser.js src/editor.js src/app.js
+           src/tabs.js src/browser.js src/editor.js src/app.js
 
 .PHONY: all debug clean test
 

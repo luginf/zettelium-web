@@ -13,8 +13,10 @@
 //  - pas de macros (`%%macroname`, `%%toc`) : les lignes `%%...` sont
 //    traitées comme des commentaires simples.
 const Txt2TagsParser = (() => {
-  function parse(source) {
-    return new Session().parse(source);
+  // `keepBlankLines` : l'aperçu veut CHAQUE ligne vide (en `BlankLines`) ; sinon seules les lignes
+  // vides au-delà de la première sont conservées (la première sépare déjà deux blocs).
+  function parse(source, { keepBlankLines = false } = {}) {
+    return new Session(keepBlankLines).parse(source);
   }
 
   class OpenList {
@@ -34,7 +36,9 @@ const Txt2TagsParser = (() => {
   }
 
   class Session {
-    constructor() {
+    constructor(keepBlankLines = false) {
+      this.keepBlankLines = keepBlankLines;
+      this.blankRun = 0;
       this.blocks = [];
       this.paragraphLines = [];
       this.commentLines = [];
@@ -47,6 +51,15 @@ const Txt2TagsParser = (() => {
       let i = 0;
       while (i < lines.length) {
         const line = lines[i];
+
+        // Lignes vides consécutives -> `BlankLines` (émis seulement si du contenu suit).
+        if (Txt2TagsRegexes.blankLine.test(line)) {
+          this.blankRun++;
+        } else {
+          const extra = this.keepBlankLines ? this.blankRun : this.blankRun - 1;
+          if (extra >= 1 && this.blocks.length > 0) this.blocks.push(BlankLines(extra));
+          this.blankRun = 0;
+        }
 
         if (Txt2TagsRegexes.blockCommentOpen.test(line)) {
           this.closeEverything();

@@ -7,9 +7,9 @@
 // original.
 const ZettelkastenLinks = (() => {
   // Format d'ID par défaut : horodatage à 14 chiffres, ex. `20260702143012`.
-  const DEFAULT_ID_REGEX = /\d{14}/;
+  const DEFAULT_ID_REGEX = /id\d{8}x\d{6}|\d{14}/;
   // Format de génération par défaut — correspond exactement à DEFAULT_ID_REGEX.
-  const DEFAULT_ID_FORMAT = '%Y%M%D%h%m%s';
+  const DEFAULT_ID_FORMAT = 'id%Y%M%Dx%h%m%s';
   // Utilisées seulement si l'appelant n'en fournit pas explicitement — voir
   // `noteExtensionsList()` dans state.js, la source de vérité réelle une
   // fois l'app démarrée.
@@ -33,13 +33,15 @@ const ZettelkastenLinks = (() => {
    * tant que génération et détection restaient désynchronisées).
    */
   function generateId(now = new Date(), format = DEFAULT_ID_FORMAT) {
+    // replaceAll, pas replace : un token répété (`%Y-%Y`) doit être remplacé partout, comme
+    // le `String.replace` de Kotlin (toutes les occurrences) et le `string map` de Tcl.
     return format
-      .replace('%Y', String(now.getFullYear()))
-      .replace('%M', pad2(now.getMonth() + 1))
-      .replace('%D', pad2(now.getDate()))
-      .replace('%h', pad2(now.getHours()))
-      .replace('%m', pad2(now.getMinutes()))
-      .replace('%s', pad2(now.getSeconds()));
+      .replaceAll('%Y', String(now.getFullYear()))
+      .replaceAll('%M', pad2(now.getMonth() + 1))
+      .replaceAll('%D', pad2(now.getDate()))
+      .replaceAll('%h', pad2(now.getHours()))
+      .replaceAll('%m', pad2(now.getMinutes()))
+      .replaceAll('%s', pad2(now.getSeconds()));
   }
 
   /** Retire tous les liens `[[cible|id]]` du texte — passe préalable avant de chercher l'ID propre d'une note. */
@@ -56,8 +58,25 @@ const ZettelkastenLinks = (() => {
   function extractId(fileName, content, idRegex = DEFAULT_ID_REGEX) {
     let m = idRegex.exec(fileName);
     if (m) return m[0];
-    m = idRegex.exec(stripLinks(content));
-    return m ? m[0] : null;
+    const body = stripLinks(content);
+    const urls = urlRanges(body);
+    const re = new RegExp(idRegex.source, 'g');
+    while ((m = re.exec(body))) {
+      if (isIsolatedMatch(body, m.index, m.index + m[0].length, urls)) return m[0];
+      if (re.lastIndex === m.index) re.lastIndex++;
+    }
+    return null;
+  }
+
+  // Un ID trouvé dans le TEXTE doit être isolé (ni lettre ni chiffre collé de chaque côté) et
+  // hors d'une URL : sinon `\d{14}` prenait 14 chiffres d'un lien ou d'un numéro plus long.
+  function urlRanges(text) {
+    return [...text.matchAll(/https?:\/\/\S+|www\.\S+/g)].map(u => [u.index, u.index + u[0].length]);
+  }
+
+  function isIsolatedMatch(text, start, end, urls) {
+    const isAlnum = ch => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+    return !isAlnum(text[start - 1]) && !isAlnum(text[end]) && !urls.some(([a, b]) => start >= a && start < b);
   }
 
   /**
@@ -73,12 +92,13 @@ const ZettelkastenLinks = (() => {
    */
   function findBodyIdOccurrence(content, idRegex = DEFAULT_ID_REGEX) {
     const links = findLinks(content);
+    const urls = urlRanges(content);
     const re = new RegExp(idRegex.source, 'g');
     let m;
     while ((m = re.exec(content))) {
       const start = m.index;
       const end = start + m[0].length;
-      if (!links.some(link => start < link.end && end > link.start)) {
+      if (!links.some(link => start < link.end && end > link.start) && isIsolatedMatch(content, start, end, urls)) {
         return { start, end };
       }
       if (re.lastIndex === m.index) re.lastIndex++; // garde-fou motif à correspondance vide

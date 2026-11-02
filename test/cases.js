@@ -350,6 +350,21 @@ test('image mixed with text', () => {
   assert.deepEqual(result[2], Text(' mixed with text.'));
 });
 
+test('markdown image reference', () => {
+  assert.deepEqual(Txt2TagsInline.parse('![a photo](image.png)'), [Image('image.png')]);
+});
+
+test('markdown image mixed with text', () => {
+  const result = Txt2TagsInline.parse('Images ![alt](image.png) mixed with text.');
+  assert.deepEqual(result[0], Text('Images '));
+  assert.deepEqual(result[1], Image('image.png'));
+  assert.deepEqual(result[2], Text(' mixed with text.'));
+});
+
+test('markdown image without alt text', () => {
+  assert.deepEqual(Txt2TagsInline.parse('![](sub/dir/image.jpg)'), [Image('sub/dir/image.jpg')]);
+});
+
 test('zettelkasten link is recognised distinctly from a labelled link', () => {
   const result = Txt2TagsInline.parse('[[note.txt|20260702143012]]');
   assert.deepEqual(result, [ZkLink('note.txt', '20260702143012')]);
@@ -539,9 +554,24 @@ test('bare hash with no following word chars is not a tag', () => {
 
 // --- ZettelkastenLinks — derived from ZettelkastenLinksTest.kt --------------
 
-test('generateId formats a 14-digit timestamp with the default format', () => {
+test('parser: extra blank lines become BlankLines, every blank line with keepBlankLines', () => {
+  assert.equal(Txt2TagsParser.parse('a\n\nb').length, 2);
+  assert.deepEqual(Txt2TagsParser.parse('a\n\n\n\nb').map(b => b.type), ['Paragraph', 'BlankLines', 'Paragraph']);
+  assert.equal(Txt2TagsParser.parse('a\n\n\n\nb')[1].count, 2);
+  assert.equal(Txt2TagsParser.parse('a\n\nb', { keepBlankLines: true })[1].count, 1);
+  assert.equal(Txt2TagsParser.parse('\n\n\na\n\n\n').length, 1);
+});
+
+test('generateId default format is the id-prefixed timestamp', () => {
   const id = ZettelkastenLinks.generateId(new Date(2026, 6, 3, 14, 30, 5));
-  assert.equal(id, '20260703143005');
+  assert.equal(id, 'id20260703x143005');
+});
+
+test('extractId in content ignores digits inside urls and longer digit runs', () => {
+  const content = 'voir https://fr.aliexpress.com/item/1005002708065030.html et 1005002708065030 puis id20261003x142706 ici';
+  assert.equal(ZettelkastenLinks.extractId('note.txt', content), 'id20261003x142706');
+  assert.equal(ZettelkastenLinks.extractId('note.txt', 'https://x.com/item/10050027080650.html 1005002708065030'), null);
+  assert.equal(ZettelkastenLinks.extractId('20260702143012 note.txt', ''), '20260702143012');
 });
 
 test('generateId honors a custom token format, matching a user-configured detection pattern', () => {
@@ -1369,4 +1399,83 @@ test('an empty body is encrypted as a single space rather than rejected', async 
   const block = NoteCrypto.findEncryptedBlock(encrypted);
   const plaintext = await NoteCrypto.decrypt(block.envelope, 'pw');
   assert.equal(plaintext, ' ');
+});
+
+// --- Greffons (contrat v2) ---------------------------------------------------
+
+test('normalizeResult keeps a string as replacement text', () => {
+  assert.deepEqual(Plugins.normalizeResult('abc'), { kind: 'text', text: 'abc' });
+});
+
+test('normalizeResult maps message and display objects', () => {
+  assert.deepEqual(Plugins.normalizeResult({ message: 'rien' }), { kind: 'message', text: 'rien' });
+  assert.deepEqual(
+    Plugins.normalizeResult({ display: { kind: 'bars', title: 'T', caption: 'a\nb', modules: ['1011'] } }),
+    { kind: 'display', bars: true, title: 'T', caption: 'a b', modules: ['1011'] });
+  assert.equal(Plugins.normalizeResult({ display: { modules: ['01'] } }).bars, false);
+});
+
+test('normalizeResult rejects unusable results', () => {
+  assert.equal(Plugins.normalizeResult(null), null);
+  assert.equal(Plugins.normalizeResult(undefined), null);
+  assert.equal(Plugins.normalizeResult({ x: 1 }), null);
+  assert.equal(Plugins.normalizeResult({ display: { modules: ['abc'] } }), null);
+  assert.equal(Plugins.normalizeResult({ display: { modules: [] } }), null);
+});
+
+test('normalizeChoices cleans Plugin.choices', () => {
+  assert.deepEqual(Plugins.normalizeChoices([{ id: 'a', label: 'Alpha' }, { id: 'b' }, null, {}]),
+    [{ id: 'a', label: 'Alpha' }, { id: 'b', label: 'b' }]);
+  assert.deepEqual(Plugins.normalizeChoices(undefined), []);
+});
+
+test('code-barres example plugin renders QR and Code 128 through the host contract', () => {
+  const file = require('node:path').join(__dirname, '..', '..', 'zettelium-plugins', 'examples', 'barcodes.js');
+  const source = require('node:fs').readFileSync(file, 'utf-8');
+  const plugin = new Function(source + '; return Plugin;')();
+  assert.deepEqual(Plugins.normalizeChoices(plugin.choices).map(c => c.id), ['qr', 'code128', 'ean13']);
+  const qr = Plugins.normalizeResult(plugin.action('t', 0, 'bonjour', 'qr'));
+  assert.equal(qr.kind, 'display');
+  assert.equal(qr.bars, false);
+  assert.equal(qr.modules.length, 21);
+  const bars = Plugins.normalizeResult(plugin.action('t', 0, 'abc', 'code128'));
+  assert.equal(bars.bars, true);
+  assert.equal(bars.modules[0].length, 11 * 5 + 13);
+  const ean = Plugins.normalizeResult(plugin.action('t', 0, '590123412345', 'ean13', 'en'));
+  assert.equal(ean.modules[0].length, 95);
+  assert.equal(ean.caption, '5 901234 123457');
+  assert.equal(ean.modules[1], '101' + '0'.repeat(42) + '01010' + '0'.repeat(42) + '101');
+  assert.equal(Plugins.normalizeResult(plugin.action('t', 0, '', 'qr', 'en')).text, 'Select or copy some text first.');
+  assert.equal(Plugins.normalizeResult(plugin.action('t', 0, '', 'qr', 'fr')).text, "Sélectionnez du texte ou copiez-le d'abord.");
+});
+
+test('normalizeChoices localizes labels with an english fallback', () => {
+  const choices = [{ id: 'a', label: { en: 'Alpha', fr: 'Alfa' } }];
+  assert.equal(Plugins.normalizeChoices(choices, 'fr')[0].label, 'Alfa');
+  assert.equal(Plugins.normalizeChoices(choices, 'en')[0].label, 'Alpha');
+  assert.equal(Plugins.normalizeChoices(choices, 'de')[0].label, 'Alpha');
+});
+
+test('normalizeResult maps an html display and flattens its title', () => {
+  assert.deepEqual(Plugins.normalizeResult({ display: { kind: 'html', title: 'T\nx', html: '<p>a</p>' } }),
+    { kind: 'html', title: 'T x', html: '<p>a</p>' });
+  assert.equal(Plugins.normalizeResult({ display: { kind: 'html' } }), null);
+});
+
+test('htmlDocument wraps the body with a no-network CSP', () => {
+  const doc = Plugins.htmlDocument('<b>x</b>');
+  assert.ok(doc.includes("default-src 'none'"));
+  assert.ok(doc.includes('<body><b>x</b></body>'));
+});
+
+test('abc-music example plugin returns an html page through the host contract', () => {
+  const file = require('node:path').join(__dirname, '..', '..', 'zettelium-plugins', 'examples', 'abc-music.js');
+  const source = require('node:fs').readFileSync(file, 'utf-8');
+  const plugin = new Function(source + '; return Plugin;')();
+  const note = 'x\n\nX:1\nT:Hi\nK:C\nCDEF|]\n\ny';
+  const page = Plugins.normalizeResult(plugin.action(note, note.indexOf('CDEF') + 1, '', '', 'en'));
+  assert.equal(page.kind, 'html');
+  assert.equal(page.title, 'Hi');
+  assert.ok(page.html.includes('ABCJS.renderAbc'));
+  assert.equal(Plugins.normalizeResult(plugin.action('nothing', 2, '', '', 'en')).kind, 'message');
 });

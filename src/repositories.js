@@ -36,9 +36,8 @@ const Repositories = (() => {
     list.innerHTML = '';
     const query = el('repo-search-input').value.trim();
     el('repo-search-clear-btn').hidden = !query;
-    const q = query.toLowerCase();
     const results = Index.entriesAllRepos()
-      .filter(e => Browser.matchesQuery(e, _searchMode, q))
+      .filter(e => Browser.matchesQuery(e, _searchMode, query))
       .sort((a, b) => a.name.localeCompare(b.name));
     el('repo-empty-hint').hidden = results.length > 0;
     el('repo-empty-hint').textContent = I18n.t('browser.emptyHintNoResults');
@@ -62,7 +61,7 @@ const Repositories = (() => {
     updateSearchBarVisibility();
 
     const query = el('repo-search-input').value.trim();
-    if (query && !el('repo-search-bar').hidden) {
+    if ((query || _searchMode === 'noid') && !el('repo-search-bar').hidden) {
       renderSearchResults();
       return;
     }
@@ -320,6 +319,42 @@ const Repositories = (() => {
     if (State.repositories.length > 1) Browser.reindexAllRepos();
   }
 
+  // Rouvre la dernière note ouverte (au lancement). Silencieux si le dépôt n'est plus
+  // autorisé (la demande de permission exige un geste de l'utilisateur) ou si la note a disparu.
+  async function restoreLastNote() {
+    let last;
+    try { last = await Storage.getMeta('lastNote'); } catch (e) { return; }
+    if (!last) return;
+    const repo = State.repositories.find(r => r.id === last.repoId);
+    if (!repo || repo.permission !== 'granted') return;
+    try {
+      const segments = last.path.split('/');
+      segments.pop();
+      let handle = repo.dirHandle;
+      let path = '';
+      const stack = [{ name: repo.name, handle, path }];
+      for (const seg of segments) {
+        handle = await handle.getDirectoryHandle(seg);
+        path += seg + '/';
+        stack.push({ name: seg, handle, path });
+      }
+      State.activeRepositoryId = repo.id;
+      State.dirStack = stack;
+      await scanActiveRepo();
+      const file = State.repoFiles.find(f => f.path === last.path);
+      if (!file) throw new Error('note introuvable');
+      el('repo-screen').hidden = true;
+      el('browser-screen').hidden = false;
+      Browser.openActive(); // pas attendu : l'index se construit en arrière-plan
+      await Editor.open(file);
+    } catch (e) {
+      State.activeRepositoryId = null;
+      resetDirStack();
+      el('browser-screen').hidden = true;
+      el('repo-screen').hidden = false;
+    }
+  }
+
   function init() {
     el('repo-add-btn').addEventListener('click', addViaPicker);
     renderColorSwatches();
@@ -361,5 +396,5 @@ const Repositories = (() => {
   // `openColorPicker` exporté (round "inventaire d'UI comparable", demande explicite de
   // l'utilisateur) — réutilisé depuis `browser.js` pour "Couleur du dépôt" dans "Options du
   // dépôt", en plus de son point d'entrée existant sur l'écran liste des dépôts.
-  return { init, render, showList, openColorPicker };
+  return { init, render, showList, openColorPicker, restoreLastNote };
 })();

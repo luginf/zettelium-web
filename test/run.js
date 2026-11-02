@@ -27,6 +27,7 @@ const FILES = [
   'tags.js',
   'ini.js',
   'highlight.js',
+  'plugins.js',
 ];
 
 const combined = FILES.map(f => fs.readFileSync(path.join(SRC, f), 'utf-8')).join('\n\n')

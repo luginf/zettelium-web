@@ -17,7 +17,7 @@ const Browser = (() => {
     return I18n.t('browser.searchPlaceholderName');
   }
 
-  let _searchMode = 'name'; // 'name' | 'content' | 'tag'
+  let _searchMode = 'name'; // 'name' | 'content' | 'tag' | 'noid'
   let _searchDebounce = null;
 
   // Portée de la recherche (round 27a Android) — 'repo' (dépôt actif
@@ -49,6 +49,10 @@ const Browser = (() => {
     } else {
       sorted.sort((a, b) => a.name.localeCompare(b.name));
     }
+    if (State.settings.noteSortFavoritesFirst) {
+      const isFav = f => isFavorite(f.repositoryId || State.activeRepositoryId, f.path);
+      return [...sorted.filter(isFav), ...sorted.filter(f => !isFav(f))];
+    }
     return sorted;
   }
 
@@ -56,36 +60,58 @@ const Browser = (() => {
   // depuis un autre écran que celui-ci — repositories.js (recherche depuis
   // l'accueil, round 28) a sa propre variable de mode, indépendante de
   // celle du navigateur d'un dépôt.
-  function matchesQuery(entry, mode, q) {
-    if (mode === 'name') return entry.name.toLowerCase().includes(q) || entry.title.toLowerCase().includes(q);
-    if (mode === 'content') return entry.content.toLowerCase().includes(q);
+  // Repli casse/accents (réglage State.settings.searchAccentSensitive) : par défaut, la
+  // recherche ignore casse ET accents ("depart" trouve "départ"). NFD décompose un
+  // caractère accentué en base + marque combinante, qu'on retire ensuite — quasi
+  // toujours 1:1 en longueur pour les accents latins usuels, hypothèse déjà implicite
+  // avant (toLowerCase) sur laquelle contentExcerpt s'appuie pour ses index.
+  function foldForSearch(s) {
+    if (State.settings.searchAccentSensitive) return s;
+    return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  }
+
+  function matchesQuery(entry, mode, rawQuery) {
+    const q = foldForSearch(rawQuery);
+    // Notes sans ID Zettelkasten ; la saisie, si présente, filtre sur le nom de fichier.
+    if (mode === 'noid') return !entry.zkId && foldForSearch(entry.name).includes(q);
+    // Le nom seul, jamais le titre (première ligne/titre détecté) — un résultat "Nom" doit
+    // correspondre au nom de fichier, pas à un contenu sans rapport avec ce qui a été tapé.
+    if (mode === 'name') return foldForSearch(entry.name).includes(q);
+    if (mode === 'content') return foldForSearch(entry.content).includes(q);
     if (mode === 'tag') {
       // "#voiture" et "voiture" doivent matcher pareil — un tag est toujours
       // stocké sans le `#` (voir tags.js), on retire juste un `#` de tête
       // sur la requête si l'utilisateur l'a tapé (même règle qu'Android :
       // `raw.removePrefix("#")`, pas un retrait de tous les `#`).
       const cleaned = q.startsWith('#') ? q.slice(1) : q;
-      return [...entry.tags].some(t => t.toLowerCase().includes(cleaned));
+      return [...entry.tags].some(t => foldForSearch(t).includes(cleaned));
     }
     return false;
   }
 
-  // Extrait de contenu centré sur la première occurrence de `q` (recherche
-  // par contenu uniquement — un extrait n'a pas vraiment de sens pour une
-  // recherche par nom/tag, déjà visibles dans le nom de la ligne) — retour
-  // utilisateur : le nom de fichier seul ne dit pas OÙ dans la note le terme
-  // apparaît. Fenêtre de contexte asymétrique (un peu moins avant le terme
-  // que derrière) pour que le terme trouvé reste proche du début de
-  // l'extrait, plus facile à repérer d'un coup d'œil qu'au milieu.
-  function contentExcerpt(content, q, maxLen = 140) {
-    const idx = content.toLowerCase().indexOf(q);
+  // Extrait de contenu centré sur la première occurrence de `rawQuery` (recherche par
+  // contenu uniquement), `contextWords` mots avant/après plutôt qu'un nombre de caractères
+  // (une ligne trouvée peut être très longue) — voir `foldForSearch` pour la casse/accents.
+  // Fenêtre large en caractères d'abord (assez pour contenir largement `contextWords` mots
+  // des deux côtés sans scanner tout le document), affinée ensuite en mots exactement.
+  function contentExcerpt(content, rawQuery, contextWords = 10) {
+    const q = foldForSearch(rawQuery);
+    if (!q) return '';
+    const idx = foldForSearch(content).indexOf(q);
     if (idx < 0) return '';
-    const before = 30, after = maxLen - before;
-    const start = Math.max(0, idx - before);
-    const end = Math.min(content.length, idx + q.length + after);
-    let snippet = content.slice(start, end).replace(/\s+/g, ' ').trim();
-    if (start > 0) snippet = '…' + snippet;
-    if (end < content.length) snippet += '…';
+    const matchEnd = idx + q.length;
+    const charMargin = 400;
+    const rawStart = Math.max(0, idx - charMargin);
+    const rawEnd = Math.min(content.length, matchEnd + charMargin);
+    const beforeWords = content.slice(rawStart, idx).trim().split(/\s+/).filter(Boolean);
+    const afterWords = content.slice(matchEnd, rawEnd).trim().split(/\s+/).filter(Boolean);
+    const beforeTrimmed = beforeWords.slice(-contextWords);
+    const afterTrimmed = afterWords.slice(0, contextWords);
+
+    let snippet = [beforeTrimmed.join(' '), content.slice(idx, matchEnd).trim(), afterTrimmed.join(' ')]
+      .filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    if (rawStart > 0 || beforeWords.length > beforeTrimmed.length) snippet = '…' + snippet;
+    if (rawEnd < content.length || afterWords.length > afterTrimmed.length) snippet += '…';
     return snippet;
   }
 
@@ -205,7 +231,7 @@ const Browser = (() => {
     main.appendChild(name);
 
     if (searchTerm && file.content) {
-      const excerpt = contentExcerpt(file.content, searchTerm.toLowerCase());
+      const excerpt = contentExcerpt(file.content, searchTerm);
       if (excerpt) {
         const excerptEl = document.createElement('span');
         excerptEl.className = 'file-item-excerpt';
@@ -596,6 +622,7 @@ const Browser = (() => {
     applyRepoColorTint();
     syncRepoOptionsUI();
     updateSortButton();
+    updateSortFavButton();
     updateSearchScopeButton();
     updateSidebarCloseButton();
 
@@ -604,7 +631,9 @@ const Browser = (() => {
 
     const query = el('browser-search-input').value.trim();
     el('browser-search-clear-btn').hidden = !query;
-    if (!query) {
+    // Étoile active + champ vide : tous les favoris de la portée (dépôt ou tous les dépôts).
+    const favoritesView = !query && !!State.settings.noteSortFavoritesFirst;
+    if (!query && _searchMode !== 'noid' && !favoritesView) {
       renderBrowseRows(list);
       return;
     }
@@ -615,7 +644,8 @@ const Browser = (() => {
     // scoped to the current folder. En portée 'all' (round 27a), interroge
     // tous les dépôts déjà indexés au lieu du seul dépôt actif.
     const pool = (_searchScope === 'all') ? Index.entriesAllRepos() : (repo ? Index.entries(repo.id) : []);
-    const results = sortFiles(pool.filter(e => matchesQuery(e, _searchMode, query.toLowerCase())));
+    const results = sortFiles(pool.filter(e => matchesQuery(e, _searchMode, query)
+      && (!favoritesView || isFavorite(e.repositoryId || State.activeRepositoryId, e.path))));
     el('browser-empty-hint').hidden = results.length > 0;
     el('browser-empty-hint').textContent = I18n.t('browser.emptyHintNoResults');
     const jumpTerm = _searchMode === 'content' ? query : undefined;
@@ -800,6 +830,18 @@ const Browser = (() => {
       : I18n.t('browser.sortByModifiedTooltip');
   }
 
+  function updateSortFavButton() {
+    const on = !!State.settings.noteSortFavoritesFirst;
+    const btn = el('browser-sort-fav-btn');
+    btn.innerHTML = Icons.star(18, on);
+    btn.title = I18n.t('browser.sortFavoritesFirstTooltip', { state: on ? 'on' : 'off' });
+  }
+
+  async function toggleSortFavorites() {
+    await setNoteSortFavoritesFirst(!State.settings.noteSortFavoritesFirst);
+    render();
+  }
+
   async function toggleSort() {
     await setNoteSortOrder(State.settings.noteSortOrder === 'modified' ? 'name' : 'modified');
     render();
@@ -932,6 +974,7 @@ const Browser = (() => {
     el('repo-options-rename-save').innerHTML = Icons.save();
     updateRepairButtonLabel();
     updateSortButton();
+    updateSortFavButton();
     el('browser-search-input').placeholder = searchPlaceholder(_searchMode);
   }
 
@@ -992,6 +1035,7 @@ const Browser = (() => {
     el('browser-refresh-btn').addEventListener('click', async () => { await rescan(); reindexActive(); });
     el('browser-new-note-btn').addEventListener('click', openNewNoteDialog);
     el('browser-sort-btn').addEventListener('click', toggleSort);
+    el('browser-sort-fav-btn').addEventListener('click', toggleSortFavorites);
     el('browser-search-scope-btn').addEventListener('click', toggleSearchScope);
     el('browser-sidebar-close-btn').addEventListener('click', () => Editor.hideFileListSidebar());
 

@@ -35,6 +35,8 @@ const State = {
     // Sort order for the file browser — 'name' | 'modified', same choice
     // and persistence as AppSettings.noteSortOrder (Android round 3).
     noteSortOrder: 'name',
+    // Favoris en tête de la liste, quel que soit l'ordre ci-dessus (même réglage qu'Android).
+    noteSortFavoritesFirst: false,
 
     // Theme (phase 6/9) — scheme name from schemes.js (SCHEMES/customSchemes)
     // + a tri-state mode ('system'|'light'|'dark', matching Android's
@@ -133,7 +135,22 @@ const State = {
     // (`crypto.randomUUID()`, `addRepository`) qui ne survivrait pas à une
     // purge/ré-ajout — volontairement absent de l'export durable
     // `zettelium.ini`, IndexedDB seul, même raisonnement que `colorTag`.
-    globalPluginsRepositoryId: null
+    globalPluginsRepositoryId: null,
+
+    // Noms de fichier (`.js`) des greffons désactivés : restent installés mais disparaissent
+    // du menu "Greffons" (voir `Editor.openPluginsDialog`) - même réglage qu'Android
+    // (`AppSettings.disabledPlugins`). Par nom de fichier, donc valable pour tous les dépôts ;
+    // IndexedDB seul, hors de l'export `zettelium.ini`.
+    disabledPlugins: [],
+
+    // Ordre choisi des greffons (noms de fichier) et puce de couleur par greffon (nom de fichier -> hex) ;
+    // IndexedDB seul. Un greffon absent de la liste d'ordre vient après les autres, par nom.
+    pluginOrder: [],
+    pluginColors: {},
+
+    // Recherche (nom/contenu/tag) sensible à la casse ET aux accents si `true` — par
+    // défaut `false` (insensible : "depart" trouve "départ"), voir `Browser.foldForSearch`.
+    searchAccentSensitive: false
   }
 };
 
@@ -210,6 +227,7 @@ async function maybeRestoreDurableConfig(repo) {
     setNoteExtensions(State.settings.noteExtensions),
     setNoteExtensionsFilterDisabled(State.settings.noteExtensionsFilterDisabled),
     setNoteSortOrder(State.settings.noteSortOrder),
+    setNoteSortFavoritesFirst(State.settings.noteSortFavoritesFirst),
     setIdPattern(State.settings.idPattern),
     setIdGenerationFormat(State.settings.idGenerationFormat),
     setScheme(State.settings.scheme),
@@ -225,7 +243,8 @@ async function maybeRestoreDurableConfig(repo) {
     setFileListSidebarMode(State.settings.fileListSidebarMode),
     setFileListSidebarWidth(State.settings.fileListSidebarWidth),
     setHeadingSizesEnabled(State.settings.headingSizesEnabled),
-    setDistractionFreeMarginFactor(State.settings.distractionFreeMarginFactor)
+    setDistractionFreeMarginFactor(State.settings.distractionFreeMarginFactor),
+    setSearchAccentSensitive(State.settings.searchAccentSensitive)
   ]);
 }
 
@@ -248,7 +267,7 @@ async function loadState() {
   const [repos, noteExtensions, filterDisabled, idPattern, idGenerationFormat, noteSortOrder, scheme, themeMode,
     language, editorFontFamily, editorFontSize, editorMarginX, editorMarginY, editorLineSpacing, autosaveEnabled,
     tocSidebarMode, fileListSidebarMode, fileListSidebarWidth, headingSizesEnabled, distractionFreeMarginFactor,
-    previewCustomCss, globalPluginsRepositoryId] = await Promise.all([
+    previewCustomCss, globalPluginsRepositoryId, searchAccentSensitive, disabledPlugins, pluginOrder, pluginColors] = await Promise.all([
     Storage.getAllRepositories(),
     Storage.getMeta('noteExtensions'),
     Storage.getMeta('noteExtensionsFilterDisabled'),
@@ -270,10 +289,15 @@ async function loadState() {
     Storage.getMeta('headingSizesEnabled'),
     Storage.getMeta('distractionFreeMarginFactor'),
     Storage.getMeta('previewCustomCss'),
-    Storage.getMeta('globalPluginsRepositoryId')
+    Storage.getMeta('globalPluginsRepositoryId'),
+    Storage.getMeta('searchAccentSensitive'),
+    Storage.getMeta('disabledPlugins'),
+    Storage.getMeta('pluginOrder'),
+    Storage.getMeta('pluginColors')
   ]);
   State.repositories = (repos || []).sort((a, b) => a.order - b.order);
   State.favorites = new Set(await Storage.getAllFavorites());
+  State.settings.noteSortFavoritesFirst = (await Storage.getMeta('noteSortFavoritesFirst')) === true;
   if (noteExtensions !== undefined) State.settings.noteExtensions = noteExtensions;
   if (filterDisabled !== undefined) State.settings.noteExtensionsFilterDisabled = filterDisabled;
   // .trim() on load (not just on write) — a leading/trailing space in a
@@ -298,6 +322,10 @@ async function loadState() {
   if (distractionFreeMarginFactor !== undefined) State.settings.distractionFreeMarginFactor = distractionFreeMarginFactor;
   if (previewCustomCss !== undefined) State.settings.previewCustomCss = previewCustomCss;
   if (globalPluginsRepositoryId !== undefined) State.settings.globalPluginsRepositoryId = globalPluginsRepositoryId;
+  if (searchAccentSensitive !== undefined) State.settings.searchAccentSensitive = searchAccentSensitive;
+  if (Array.isArray(disabledPlugins)) State.settings.disabledPlugins = disabledPlugins;
+  if (Array.isArray(pluginOrder)) State.settings.pluginOrder = pluginOrder;
+  if (pluginColors && typeof pluginColors === 'object') State.settings.pluginColors = pluginColors;
 
   // Re-verify permission on every repository without prompting — a prompt
   // requires a user gesture, done on demand via reauthorizeRepository().
@@ -465,6 +493,12 @@ async function setIdGenerationFormat(value) {
   scheduleDurableExport();
 }
 
+async function setNoteSortFavoritesFirst(value) {
+  State.settings.noteSortFavoritesFirst = !!value;
+  await Storage.setMeta('noteSortFavoritesFirst', State.settings.noteSortFavoritesFirst);
+  scheduleDurableExport();
+}
+
 async function setNoteSortOrder(value) {
   State.settings.noteSortOrder = value;
   await Storage.setMeta('noteSortOrder', value);
@@ -581,6 +615,32 @@ async function setGlobalPluginsRepositoryId(value) {
   await Storage.setMeta('globalPluginsRepositoryId', value);
 }
 
+async function setPluginDisabled(fileName, disabled) {
+  const current = new Set(State.settings.disabledPlugins);
+  if (disabled) current.add(fileName); else current.delete(fileName);
+  State.settings.disabledPlugins = [...current];
+  await Storage.setMeta('disabledPlugins', State.settings.disabledPlugins);
+}
+
+async function setPluginOrder(order) {
+  State.settings.pluginOrder = order;
+  await Storage.setMeta('pluginOrder', order);
+}
+
+// `hex` null = pas de puce.
+async function setPluginColor(fileName, hex) {
+  const colors = { ...State.settings.pluginColors };
+  if (hex) colors[fileName] = hex; else delete colors[fileName];
+  State.settings.pluginColors = colors;
+  await Storage.setMeta('pluginColors', colors);
+}
+
+async function setSearchAccentSensitive(value) {
+  State.settings.searchAccentSensitive = value;
+  await Storage.setMeta('searchAccentSensitive', value);
+  scheduleDurableExport();
+}
+
 // --- Favoris (round 28 Android) ---------------------------------------------
 
 function favoriteKey(repositoryId, path) {
@@ -611,6 +671,7 @@ async function toggleFavorite(repositoryId, path) {
 // l'originale (décision volontaire, même choix qu'Android) — pas de rekey
 // pour une duplication, seulement pour un vrai renommage/déplacement.
 async function rekeyFavorite(oldRepositoryId, oldPath, newRepositoryId, newPath) {
+  Tabs.rekey(oldRepositoryId, oldPath, newRepositoryId, newPath);
   const oldKey = favoriteKey(oldRepositoryId, oldPath);
   if (!State.favorites.has(oldKey)) return;
   State.favorites.delete(oldKey);
@@ -621,6 +682,7 @@ async function rekeyFavorite(oldRepositoryId, oldPath, newRepositoryId, newPath)
 }
 
 async function removeFavorite(repositoryId, path) {
+  Tabs.removePath(repositoryId, path);
   const key = favoriteKey(repositoryId, path);
   if (!State.favorites.has(key)) return;
   State.favorites.delete(key);

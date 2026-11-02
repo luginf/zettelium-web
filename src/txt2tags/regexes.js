@@ -85,8 +85,17 @@ const Txt2TagsRegexes = (() => {
   const URL_ANCHOR = String.raw`A-Za-z0-9%._-`;
   const URL_FORM = String.raw`A-Za-z0-9/%&=+:;.,$@*_-`;
 
+  // Extensions d'image reconnues, partagées entre la syntaxe txt2tags d'origine (PATT_IMG)
+  // et la syntaxe markdown (PATT_MARKDOWN_IMG) ci-dessous.
+  const IMG_EXTENSIONS = String.raw`png|jpe?g|gif|eps|bmp|svg`;
+
   // [image.ext] — groupe nommé "path".
-  const PATT_IMG = String.raw`\[(?<path>[\w_,.+%$#@!?+~/-]+\.(?:png|jpe?g|gif|eps|bmp|svg))\]`;
+  const PATT_IMG = String.raw`\[(?<path>[\w_,.+%$#@!?+~/-]+\.(?:${IMG_EXTENSIONS}))\]`;
+
+  // Extension Zettelium (pas dans txt2tags d'origine) : image markdown `![alt](chemin)`, en
+  // plus du `[chemin]` txt2tags natif — parité avec zettelium-android (round 55). Le texte
+  // alternatif est ignoré : l'AST `Image` ne porte qu'un chemin, comme pour PATT_IMG.
+  const PATT_MARKDOWN_IMG = String.raw`!\[[^\]]*\]\((?<path>[\w_,.+%$#@!?+~/-]+\.(?:${IMG_EXTENSIONS}))\)`;
 
   // nom[:mot_de_passe] @
   const urlLoginPatt = `([${URL_LOGIN}]+(:${URL_PASS})?@)?`;
@@ -110,6 +119,7 @@ const Txt2TagsRegexes = (() => {
   const linkmark = new RegExp(
     String.raw`\[(?<label>[^\]]+) (?<link>${retxtUrl}|${pattEmail}|${retxtUrlLocal})\]`, 'i');
   const img = new RegExp(PATT_IMG, 'i');
+  const markdownImg = new RegExp(PATT_MARKDOWN_IMG, 'i');
 
   // [[ cible | zkId ]] — convention Zettelium (pas de la syntaxe txt2tags d'origine),
   // voir zettelkasten.js. Double crochets + `|`, jamais confondu avec `linkmark`
@@ -124,6 +134,6 @@ const Txt2TagsRegexes = (() => {
     list, numlist, deflist, listClose,
     bar, table, blankLine, comment, markdownHeading,
     title, numtitle,
-    email, link, linkmark, img, zkLink,
+    email, link, linkmark, img, markdownImg, zkLink,
   };
 })();

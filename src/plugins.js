@@ -25,8 +25,53 @@
 // greffon peut inclure UNE FOIS `CURSOR_MARKER` dans le texte renvoyé (voir
 // `stripCursorMarker` ci-dessous) — même convention qu'Android
 // (`PLUGIN_CURSOR_MARKER`, `ui/PluginCursor.kt`).
+//
+// Contrat v2 (voir le CLAUDE.md des greffons) : `Plugin.choices` ([{id, label}]) demande un
+// choix à l'utilisateur après sélection du greffon, `action(text, cursor, selection, choice)`
+// reçoit la sélection et le choix, et peut renvoyer autre chose qu'un texte :
+// `{message: "..."}` ou `{display: {kind: 'matrix'|'bars', title, caption, modules: ['0101', ...]}}`
+// (voir `normalizeResult`, `drawDisplay`).
 const Plugins = (() => {
   const CURSOR_MARKER = '{{cursor}}';
+
+  /** Normalise le retour de `Plugin.action` en `{kind: 'text', text}`, `{kind: 'message', text}`
+   *  ou `{kind: 'display', bars, title, caption, modules}` ; `null` si inexploitable. Écrite
+   *  SANS référence extérieure : elle est aussi injectée telle quelle (`toString`) dans le
+   *  Worker. */
+  function normalizeResult(r) {
+    if (typeof r === 'string') return { kind: 'text', text: r };
+    if (!r || typeof r !== 'object') return null;
+    if (typeof r.message === 'string') return { kind: 'message', text: r.message };
+    const d = r.display;
+    if (d && d.kind === 'html' && typeof d.html === 'string') {
+      return { kind: 'html', title: String(d.title == null ? '' : d.title).replace(/[\r\n]+/g, ' '), html: d.html };
+    }
+    if (!d || !Array.isArray(d.modules)) return null;
+    const modules = d.modules.map(String).filter(line => /^[01]+$/.test(line));
+    if (modules.length === 0) return null;
+    const flat = value => String(value == null ? '' : value).replace(/[\r\n]+/g, ' ');
+    return { kind: 'display', bars: d.kind === 'bars', title: flat(d.title), caption: flat(d.caption), modules };
+  }
+
+  /** `Plugin.choices` nettoyé en `[{id, label}]` (vide si absent/invalide). Même remarque que
+   *  `normalizeResult` : injectée dans le Worker. */
+  function normalizeChoices(choices, lang) {
+    if (!Array.isArray(choices)) return [];
+    const loc = (v, l) => {
+      if (v && typeof v === 'object') {
+        let r = v[l] != null ? v[l] : v.en;
+        if (r == null) for (const k in v) { r = v[k]; break; }
+        return r;
+      }
+      return v;
+    };
+    return choices
+      .filter(c => c && c.id != null)
+      .map(c => {
+        const label = loc(c.label, lang);
+        return { id: String(c.id), label: String(label == null ? c.id : label) };
+      });
+  }
 
   /** Retire `CURSOR_MARKER` de `result` s'il est présent (seule la première occurrence
    *  compte) et calcule la position de curseur correspondante ; sinon renvoie
@@ -62,13 +107,14 @@ const Plugins = (() => {
   // absent ou a levé une exception) — jamais d'exception qui remonterait comme une erreur
   // Worker non gérée.
   const WORKER_BODY = `
+    var normalizeResult = ${normalizeResult.toString()};
     self.onmessage = function (e) {
-      var source = e.data.source, text = e.data.text, cursor = e.data.cursor;
+      var d = e.data;
       var result = null;
       try {
-        (0, eval)(source);
+        (0, eval)(d.source);
         if (typeof Plugin !== 'undefined' && typeof Plugin.action === 'function') {
-          result = Plugin.action(text, cursor);
+          result = normalizeResult(Plugin.action(d.text, d.cursor, d.selection, d.choice, d.lang));
         }
       } catch (err) {
         result = null;
@@ -81,11 +127,12 @@ const Plugins = (() => {
    * Exécute `source` (le texte d'un greffon) sur `text` (à partir de `cursor`, la position
    * du curseur au moment de l'appel) dans un Worker jetable — un par appel, jamais réutilisé
    * entre deux exécutions (même principe que `PluginHost` côté Android : pas de mémoire
-   * persistante d'un appel à l'autre). Résout `null` en cas d'échec (exception JS,
+   * persistante d'un appel à l'autre). `selection` = texte sélectionné, `choice` = id choisi
+   * parmi `Plugin.choices`. Résout `null` en cas d'échec (exception JS,
    * `Plugin`/`Plugin.action` absent, ou délai dépassé — un greffon qui boucle indéfiniment ne
    * doit pas bloquer l'éditeur).
    */
-  function runAction(source, text, cursor) {
+  function runAction(source, text, cursor, selection = '', choice = '', lang = 'en') {
     return new Promise(resolve => {
       const blobUrl = URL.createObjectURL(new Blob([WORKER_BODY], { type: 'application/javascript' }));
       const worker = new Worker(blobUrl);
@@ -100,37 +147,41 @@ const Plugins = (() => {
       const timeout = setTimeout(() => finish(null), 5000);
       worker.onmessage = e => {
         clearTimeout(timeout);
-        finish(typeof e.data.result === 'string' ? e.data.result : null);
+        finish(e.data.result || null);
       };
       worker.onerror = () => {
         clearTimeout(timeout);
         finish(null);
       };
-      worker.postMessage({ source, text, cursor });
+      worker.postMessage({ source, text, cursor, selection, choice, lang });
     });
   }
 
   // Même sandbox/Worker jetable que `runAction` (pas d'`eval` en dehors), pour lire
-  // `Plugin.name` sans exécuter `action` — affiché dans le menu "Greffons" à la place du
-  // nom de fichier (voir `EditorScreen` côté Android, `PluginHost.readName`). `null` si
-  // absent/invalide/délai dépassé.
+  // `Plugin.name` et `Plugin.choices` sans exécuter `action` - le nom est affiché dans le menu
+  // "Greffons" à la place du nom de fichier (voir `EditorScreen` côté Android,
+  // `PluginHost.readName`). `{name: null, choices: []}` si absent/invalide/délai dépassé.
   const METADATA_WORKER_BODY = `
+    var normalizeChoices = ${normalizeChoices.toString()};
     self.onmessage = function (e) {
-      var source = e.data.source;
-      var name = null;
+      var name = null, choices = [];
       try {
-        (0, eval)(source);
-        if (typeof Plugin !== 'undefined' && typeof Plugin.name === 'string') {
-          name = Plugin.name;
+        (0, eval)(e.data.source);
+        if (typeof Plugin !== 'undefined') {
+          // Plugin.name (chaîne ou {en, fr}) : passe par le même résolveur que les libellés.
+          var n = normalizeChoices([{ id: 'n', label: Plugin.name }], e.data.lang)[0].label;
+          if (Plugin.name != null) name = n;
+          choices = normalizeChoices(Plugin.choices, e.data.lang);
         }
       } catch (err) {
         name = null;
+        choices = [];
       }
-      self.postMessage({ name: name });
+      self.postMessage({ name: name, choices: choices });
     };
   `;
 
-  function readName(source) {
+  function readMetadata(source, lang = 'en') {
     return new Promise(resolve => {
       const blobUrl = URL.createObjectURL(new Blob([METADATA_WORKER_BODY], { type: 'application/javascript' }));
       const worker = new Worker(blobUrl);
@@ -142,19 +193,63 @@ const Plugins = (() => {
         URL.revokeObjectURL(blobUrl);
         resolve(value);
       };
-      const timeout = setTimeout(() => finish(null), 5000);
+      const timeout = setTimeout(() => finish({ name: null, choices: [] }), 5000);
       worker.onmessage = e => {
         clearTimeout(timeout);
         const name = typeof e.data.name === 'string' ? e.data.name.trim() : '';
-        finish(name || null);
+        finish({ name: name || null, choices: e.data.choices || [] });
       };
       worker.onerror = () => {
         clearTimeout(timeout);
-        finish(null);
+        finish({ name: null, choices: [] });
       };
-      worker.postMessage({ source });
+      worker.postMessage({ source, lang });
     });
   }
 
-  return { list, runAction, readName, stripCursorMarker };
+  /** Page complète d'un greffon `html` : le corps fourni par le greffon est enveloppé dans un
+   *  document portant une CSP stricte (scripts/styles inline seulement, aucun réseau) - un
+   *  greffon HTML ne doit pas rouvrir l'accès réseau qu'un Worker nu aurait déjà. Affichée dans
+   *  une iframe `sandbox="allow-scripts"` (origine opaque, aucun accès à la page hôte). */
+  function htmlDocument(body) {
+    const csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:";
+    return '<!doctype html><html><head><meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+      + '<meta http-equiv="Content-Security-Policy" content="' + csp + '">'
+      + '</head><body>' + body + '</body></html>';
+  }
+
+  /** Dessine un résultat `display` dans `canvas` : noir sur blanc quel que soit le thème, zone
+   *  de silence autour (QR : 4 modules, code-barres : 10), taille de module entière pour des
+   *  bords nets. */
+  function drawDisplay(canvas, display, box) {
+    const quiet = display.bars ? 10 : 4;
+    const cols = display.modules[0].length + 2 * quiet;
+    const rows = display.bars ? 1 : display.modules.length + 2 * quiet;
+    // `box` ({width, height}, plein écran) : on remplit la zone ; un code-barres s'allonge sur
+    // tout l'écran en paysage et garde son rapport 2:1 en portrait.
+    const maxWidth = box ? box.width : display.bars ? 480 : 360;
+    const scale = Math.max(1, Math.floor(box && !display.bars ? Math.min(box.width / cols, box.height / rows) : maxWidth / cols));
+    const width = cols * scale;
+    const height = display.bars
+      ? (box ? (box.width > box.height ? box.height : Math.min(box.height, Math.round(width * 0.5))) : Math.round(width * 0.5))
+      : rows * scale;
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = '#000';
+    display.modules.forEach((line, y) => {
+      for (let x = 0; x < line.length; x++) {
+        if (line[x] !== '1') continue;
+        if (display.bars) ctx.fillRect((x + quiet) * scale, 0, scale, y === 0 && display.modules.length > 1 ? Math.round(height * 0.85) : height);
+        else ctx.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
+      }
+    });
+  }
+
+  return { list, runAction, readMetadata, drawDisplay, htmlDocument, normalizeResult, normalizeChoices, stripCursorMarker };
 })();

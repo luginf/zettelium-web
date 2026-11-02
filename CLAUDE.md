@@ -2617,7 +2617,7 @@ vérifier qu'il apparaît dans le menu et transforme bien le texte de la note ou
 
 **Round 38 (2026-08-04) — greffons : insertion au curseur** : miroir du round 40 côté
 `zettelium-android` (voir son CLAUDE.md pour le détail complet), suite à un retour utilisateur
-sur l'exemple `date-du-jour.js` (fichier PARTAGÉ entre les deux plateformes, round 37) — "je
+sur l'exemple `todays-date.js` (fichier PARTAGÉ entre les deux plateformes, round 37) — "je
 veux que cela s'insère au curseur" plutôt qu'à la fin de la note. Contrat étendu de façon
 rétrocompatible (documenté dans `~/src/zettelium/zettelium-plugins/CLAUDE.md`).
 - **`Plugin.action(text, cursor)`** : `Plugins.runAction(source, text, cursor)` transmet
@@ -2636,7 +2636,7 @@ rétrocompatible (documenté dans `~/src/zettelium/zettelium-plugins/CLAUDE.md`)
   <position calculée>})` — même helper que `formatHeading`/`formatBold`/etc. (menu contextuel de
   mise en forme), qui passe déjà par `execCommand('insertText')` pour s'intégrer à l'undo natif
   du navigateur puis positionne explicitement la sélection.
-- **`examples/date-du-jour.js` mis à jour** (le même fichier sert aux deux plateformes) :
+- **`examples/todays-date.js` mis à jour** (le même fichier sert aux deux plateformes) :
   découpe `text` à `cursor`, insère le titre daté entre les deux moitiés, place `"{{cursor}}"`
   juste après pour que le curseur retombe à cet endroit précis après application.
 
@@ -2644,7 +2644,7 @@ rétrocompatible (documenté dans `~/src/zettelium/zettelium-plugins/CLAUDE.md`)
 périmètre `node:test`) passent ; chargement headless Chrome du bundle reconstruit sans erreur
 JS. `./gradlew compileDebugKotlin testDebugUnitTest assembleDebug` passe côté Android (217
 tests, +4). **Non testé fonctionnellement sur navigateur/device réel par Claude** — à confirmer
-par l'utilisateur avec `date-du-jour.js` réinstallé dans un dépôt réel : le curseur doit se
+par l'utilisateur avec `todays-date.js` réinstallé dans un dépôt réel : le curseur doit se
 retrouver juste après le titre inséré, pas en fin de note.
 
 **Round 39 (2026-08-11) - recherche depuis l'accueil + extrait de contenu
@@ -2871,6 +2871,90 @@ test/run.js` (209/209, inchangé — ce round touche FSA/Worker/DOM, pas de logi
 nouvelle), dump `Accessibility.getFullAXTree` (`test/ui-inventory-settings.js`) confirmant
 la section "Greffons"/le sélecteur affichés dans le DOM rendu.
 
+**Round 44 (2026-09-11) — recherche insensible aux accents, réglage casse/accents** :
+demande explicite, même jour qu'Android (round 52 de son HISTORY.md)/desktop (round 12).
+- **`Browser.foldForSearch(s)`** (nouveau) : `s.normalize('NFD').replace(/[̀-ͯ]/g,
+  '').toLowerCase()` sauf si `State.settings.searchAccentSensitive` — appelé dans
+  `matchesQuery`/`contentExcerpt` (repliés en interne, les appelants ne pré-lowercasent
+  plus la requête eux-mêmes) — un seul point de repli, partagé par les DEUX barres de
+  recherche (`repositories.js` réutilise déjà `Browser.matchesQuery`).
+- **`x` pour effacer** : déjà présent des deux côtés depuis les rounds 22/39
+  (`#browser-search-clear-btn`/`#repo-search-clear-btn`) — rien à faire ici.
+- Nouveau réglage `State.settings.searchAccentSensitive` (défaut `false` = insensible),
+  section Réglages "Recherche" (entre Fichiers et Zettelkasten), exporté dans
+  `zettelium.ini` (`search_accent_sensitive`, bool — pas de souci d'UUID contrairement à
+  `globalPluginsRepositoryId`).
+- **Coût CPU négligeable** (question explicite) : la normalisation Unicode est linéaire sur
+  du texte déjà scanné pour `.includes()` — même ordre de grandeur qu'avant, `toLowerCase()`
+  seul faisait déjà ce genre de passe.
+
+`node --check` sur les fichiers touchés, `make clean && make test` (209/209, inchangé —
+`matchesQuery`/`contentExcerpt` touchent déjà du DOM/state en amont, pas de nouvelle
+logique pure isolée dans la suite `node:test`). Vérifié isolément en Node (script jetable) :
+`foldForSearch('départ')`/`foldForSearch('DEPART')` se recoupent en sous-chaîne, mode
+sensible ne replie rien.
+
+**Round 45 (2026-09-11) — résultats de recherche : extrait par mots (pas caractères), mode
+"Nom" ne matche plus le titre** : deux retours utilisateur, même jour qu'Android (round 53
+de son HISTORY.md)/desktop (round 13) — web était déjà partiellement correct (n'affichait
+jamais le titre à la place d'un extrait, contrairement à Android/desktop) mais avait les
+deux mêmes défauts sous-jacents.
+- **`matchesQuery` mode 'name' matchait aussi `entry.title`** — retiré, ne matche plus que
+  `entry.name` (nom de fichier), sur les deux plateformes sœurs aussi (bug pré-existant
+  au round 44, pas introduit par lui).
+- **`contentExcerpt` repensé en fenêtre de MOTS (10 avant/10 après), pas de caractères**
+  (l'ancienne version prenait 30 caractères avant + jusqu'à 140 au total — une "ligne"
+  trouvée pouvait être coupée n'importe où, y compris en plein mot) : fenêtre large en
+  caractères d'abord (400, pour ne jamais scanner tout le document), affinée ensuite en
+  mots exactement via `split(/\s+/)` — ignore aussi les sauts de ligne (déjà le cas avant,
+  `\s+` collapsé).
+
+`node --check` sur les fichiers touchés, `make clean && make test` (209/209, inchangé).
+Vérifié isolément en Node (script jetable) : extrait correctement centré et tronqué à 10
+mots de chaque côté avec `…`, sauts de ligne aplatis, `''` sans correspondance.
+
+**Round 46 (2026-09-18) - audit : images markdown, `generateId`** :
+- Parité Android round 55 : `![alt](chemin)` reconnu comme `Image` (`regexes.js`
+  `markdownImg`, `inline.js`), même mécanisme que desktop round 14. 3 tests.
+- `generateId` : `replaceAll` au lieu de `replace` - un token répété (`%Y-%Y`)
+  n'était remplacé qu'une fois, contrairement à Kotlin/Tcl.
+
+`make test` : 212/212 (+3), `make` reconstruit.
+
+**Round 47 (2026-10-08) - greffons, contrat v2 (choix, sélection, affichage)** : voir
+`../zettelium-plugins/CLAUDE.md` ("Contrat v2"). `plugins.js` : `normalizeResult`/
+`normalizeChoices` (pures, injectées dans les Workers via `toString()`), `readMetadata`
+(remplace `readName`, renvoie aussi `Plugin.choices`), `runAction(source, text, cursor,
+selection, choice)` résout un objet `{kind: 'text'|'message'|'display'}`, `drawDisplay`
+(`<canvas>`, noir sur blanc). `editor.js` : `askPluginChoice` (`plugin-choice-dlg`),
+`showPluginDisplay` (`plugin-display-dlg`). 7 tests (`make test` : 219, dont l'exemple
+`barcodes.js` passé dans le contrat). Vérifié dans Brave headless (CDP) : métadonnées,
+`runAction` dans un vrai Worker, rendu canvas relu. **Non vérifié** : le parcours complet par
+l'UI (menu > greffon > choix > dialogue), qui exige le File System Access API (sélecteur de
+dossier, pas pilotable en headless).
+
+**Round 48 (2026-10-08) - greffons : pages HTML (partitions ABC), désactivation par cases à
+cocher** : parité avec Android (voir `../zettelium-plugins/CLAUDE.md`). `plugins.js` :
+`normalizeResult` gère `{display: {kind: "html"}}` -> `{kind: 'html', title, html}`,
+`Plugins.htmlDocument(body)` enveloppe le corps dans un document avec CSP sans réseau.
+`editor.js` : `showPluginHtml` affiche la page dans `<iframe sandbox="allow-scripts">` (origine
+opaque, `srcdoc` vidé à la fermeture pour couper le son), icône plein écran ; `openPluginsDialog`
+refactoré en `runPlugin`/`renderPluginsList` avec un mode "gérer" (icône réglage, case par
+greffon, `State.settings.disabledPlugins` persisté par nom de fichier en IndexedDB, absent de
+`zettelium.ini`). Plugin ABC `abc-music.js` : 4 modes de tablature, zoom, tin whistle. 3 tests
+(`make test` : 223). Vérifié dans Brave headless : la partition s'affiche dans l'iframe sandboxée
+sous la CSP, plein écran, fermeture. **Non vérifié** : le parcours complet par l'UI (menu >
+greffon), le mode "gérer", la lecture audio réelle dans l'iframe (File System Access / geste
+utilisateur non pilotables en headless).
+
+**Round 49 (2026-10-11) - dernière note rouverte au lancement** : `Editor.open` écrit la méta
+`lastNote` (`{repoId, path}`) ; `Repositories.restoreLastNote()` (appelé en fin d'`init`) recrée
+la pile de dossiers, ouvre le navigateur puis la note, curseur restauré par le mécanisme
+existant. Silencieux si le dépôt n'est plus autorisé (la permission FSA exige un geste) ou si la
+note a disparu. Le curseur n'était enregistré qu'à la fermeture de la note : désormais aussi 1 s
+après chaque frappe/clic et à `visibilitychange` (onglet fermé). `make all` + `node test/run.js`
+OK, **non essayé dans un vrai navigateur** (FSA).
+
 ## Ne jamais faire
 
 - Ne jamais commiter au nom de l'utilisateur sans demande explicite.
@@ -2889,3 +2973,9 @@ la section "Greffons"/le sélecteur affichés dans le DOM rendu.
   `ignored=true` a des descendants forcément ignorés eux aussi — vérifié faux (le wrapper
   racine de l'appli est lui-même `ignored`) : ne filtrer que l'affichage du nœud, jamais
   élaguer tout son sous-arbre sans vérifier.
+
+**Round 32 (2026-10-30) - onglets de notes** : demande explicite, barre EN BAS de l'éditeur (`#ed-tabbar`, dans `#editor-screen`, visible avec 2+ onglets), un lien suivi REMPLACE l'onglet courant, un lien maintenu ~500 ms dans l'aperçu ouvre `#link-open-dlg` (onglet courant / nouvel onglet).
+- Nouveau module `src/tabs.js` (`Tabs`, ajouté à `build.py`/`Makefile`, `Tabs.init()` avant `Editor.init()` dans `app.js`) : liste `{repoId, path, name}` (10 max) persistée dans `meta.openTabs`. `Editor.open(file, {tabMode})` appelle `Tabs.noteOpened(repoId, file, tabMode, prevPath)` : défaut = ajoute/active ; `'replace'` (backlink, lien d'aperçu, "Suivre le lien", renommage) remplace l'onglet de la note quittée, ou le ferme si la cible est déjà ouverte ; `'activate'` = nouvel onglet. Fermer l'onglet actif = remplacer par son voisin. Un seul éditeur existe : changer d'onglet passe par `Editor.openOther` (garde-fou "enregistrer avant de quitter" et curseur sauvegardé).
+- Les onglets suivent `rekeyFavorite`/`removeFavorite` (déjà appelés aux points de renommage/déplacement/suppression). Les fichiers sont retrouvés en descendant les handles du dépôt (l'index peut ne pas être prêt au lancement) ; un onglet introuvable est retiré. Menu clic droit : "Suivre le lien dans un nouvel onglet" en plus de "Suivre le lien".
+- Pas de raccourcis clavier (Ctrl+Tab/Ctrl+W sont réservés par le navigateur) ; clic milieu sur un onglet = fermer.
+- Vérifié en Brave headless + CDP avec dépôt factice (ajout, remplacement, remplacement par un doublon, nouvel onglet, clic, fermeture : état correct, aucune exception). `make test` 223/223. Le maintien de 500 ms sur un vrai lien d'aperçu n'est pas exercé.

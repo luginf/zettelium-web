@@ -36,6 +36,7 @@ JS_ORDER = [
     'repositories.js',
     'settings.js',
     'theme-editor.js',
+    'tabs.js',
     'browser.js',
     'editor.js',
     'app.js',

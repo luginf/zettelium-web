@@ -35,6 +35,10 @@ function Comment(lines) { return { type: 'Comment', lines }; }
 
 function HorizontalRule(marker) { return { type: 'HorizontalRule', marker }; }
 
+// `count` lignes vides à rendre en espace vertical (extension Zettelium, aperçu seulement) -
+// voir `Txt2TagsParser.parse(source, { keepBlankLines: true })`.
+function BlankLines(count) { return { type: 'BlankLines', count }; }
+
 // kind: 'verbatim' | 'raw' | 'tagged' (CodeBlockKind Kotlin enum -> string).
 function CodeBlock(lines, kind) { return { type: 'CodeBlock', lines, kind }; }
 

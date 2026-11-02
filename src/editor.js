@@ -121,8 +121,26 @@ const Editor = (() => {
     }
   }
 
+  // Dernière note ouverte, rouverte au prochain lancement (voir Repositories.restoreLastNote).
+  function rememberLastNote() {
+    if (!_repo || !_file) return;
+    Storage.setMeta('lastNote', { repoId: _repo.id, path: _file.path }).catch(() => {});
+  }
+
+  // Le curseur n'était enregistré qu'à la fermeture de la note : fermer l'onglet le perdait.
+  // Enregistrement différé à chaque déplacement, plus un enregistrement immédiat quand la
+  // page passe en arrière-plan.
+  let _cursorSaveTimer = null;
+  function scheduleCursorSave() {
+    if (!_file) return;
+    clearTimeout(_cursorSaveTimer);
+    _cursorSaveTimer = setTimeout(saveCursorPosition, 1000);
+  }
+
   async function open(file, options = {}) {
     await saveCursorPosition(); // de la note précédente, si l'éditeur était déjà ouvert sur une autre
+    const prevPath = _file ? _file.path : null;
+    const prevRepoId = _repo ? _repo.id : null; // pour Tabs : un suivi de lien remplace l'onglet de cette note
 
     let rawContent;
     try {
@@ -211,6 +229,8 @@ const Editor = (() => {
       }
     }
     input.setSelectionRange(offset, offset);
+    rememberLastNote();
+    if (_repo) Tabs.noteOpened(_repo.id, file, options.tabMode, prevPath, prevRepoId);
     const top = pixelTopForOffset(offset);
     input.scrollTop = Math.max(0, top - input.clientHeight / 3);
     // Synchronise `pre()` immédiatement plutôt que d'attendre l'évènement
@@ -1008,6 +1028,7 @@ const Editor = (() => {
     if (!_file) return; // rien d'ouvert — no-op sûr (ex. Editor.requestClose() appelé sans note active)
     cancelAutosave();
     await saveCursorPosition();
+    Tabs.noteClosed();
     _repo = null;
     _file = null;
     _zkId = null;
@@ -1047,7 +1068,7 @@ const Editor = (() => {
   // (`toggleChecklistItem`) sans repasser par `togglePreview` (qui bascule
   // aussi le mode édition/aperçu, non souhaité ici).
   function renderPreview() {
-    const ast = Txt2TagsParser.parse(ta().value);
+    const ast = Txt2TagsParser.parse(ta().value, { keepBlankLines: true });
     const resolveZkLink = _repo ? (zkId => Index.findByZkId(_repo.id, zkId)) : undefined;
     const checklistIndices = Txt2TagsChecklist.assignIndices(ast);
     el('ed-preview').innerHTML = Txt2TagsRender.renderAstToHtml(ast, { resolveZkLink, checklistIndices });
@@ -1108,7 +1129,34 @@ const Editor = (() => {
     e.preventDefault();
     const entry = Index.findByPath(_repo.id, link.dataset.zkPath);
     if (!entry) return;
-    openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified });
+    openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified }, { tabMode: 'replace' });
+  }
+
+  // Lien maintenu (~500 ms) dans l'aperçu : propose onglet courant / nouvel onglet.
+  let _holdTimer = null;
+  let _holdFired = false;
+  let _holdEntry = null;
+  function onPreviewMouseDown(e) {
+    _holdFired = false;
+    if (e.button !== 0) return;
+    const link = e.target.closest('.zk-link[data-zk-path]');
+    if (!link || !_repo) return;
+    const entry = Index.findByPath(_repo.id, link.dataset.zkPath);
+    if (!entry) return;
+    _holdFired = false;
+    clearTimeout(_holdTimer);
+    _holdTimer = setTimeout(() => {
+      _holdFired = true;
+      _holdEntry = { path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified };
+      el('link-open-dlg').showModal();
+    }, 500);
+  }
+  function cancelPreviewHold() { clearTimeout(_holdTimer); }
+  function chooseLinkOpen(newTab) {
+    el('link-open-dlg').close();
+    const file = _holdEntry;
+    _holdEntry = null;
+    if (file) openOther(file, { tabMode: newTab ? 'activate' : 'replace' });
   }
 
   // Bascule d'une case à cocher tapée dans l'aperçu (round 32 Android) —
@@ -1144,6 +1192,7 @@ const Editor = (() => {
     const input = ta();
     _ctxLink = ZettelkastenLinks.linkAt(input.value, input.selectionStart, input.selectionEnd);
     el('ed-ctx-follow-link').hidden = !_ctxLink;
+    el('ed-ctx-follow-link-tab').hidden = !_ctxLink;
     // "Évaluer" — visible seulement si la sélection courante n'est pas vide
     // (round 30 Android : évaluer une sélection vide n'a pas de sens,
     // contrairement aux autres actions de ce menu qui basculent la ligne ou
@@ -1264,19 +1313,30 @@ const Editor = (() => {
 
   // Même garde-fou "enregistrer avant de quitter" que le clic sur un ZkLink
   // résolu dans l'aperçu (`onPreviewClick`) — `openOther` s'en charge déjà.
-  function followContextLink() {
+  function followContextLink(newTab) {
     if (!_ctxLink || !_repo) return;
     const entry = Index.findByZkId(_repo.id, _ctxLink.zkId);
     if (!entry) {
       alert(I18n.t('editor.ctxLinkNotFound', { zkId: _ctxLink.zkId }));
       return;
     }
-    openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified });
+    openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified },
+      { tabMode: newTab ? 'activate' : 'replace' });
   }
+  function followContextLinkNewTab() { followContextLink(true); }
 
   // --- Menu "⋮" (overflow) ----------------------------------------------------
 
+  // Libellé/icône de l'entrée favori selon l'état courant de la note.
+  function refreshFavoriteMenuItem() {
+    if (!_repo || !_file) return;
+    const fav = isFavorite(_repo.id, _file.path);
+    el('editor-menu-favorite').innerHTML =
+      `${Icons.star(18, fav)} ${I18n.t(fav ? 'browser.removeFavorite' : 'browser.addFavorite')}`;
+  }
+
   function openEditorMenu() {
+    refreshFavoriteMenuItem();
     updateEditorMenuVisibility();
     el('editor-menu').hidden = false;
   }
@@ -1295,7 +1355,6 @@ const Editor = (() => {
   // DropdownMenu) ; recherche alignée dessus par cohérence, pas d'équivalent
   // Android à porter (pas de recherche en note côté Android non plus).
   function updateEditorMenuVisibility() {
-    el('editor-menu-search').hidden = _previewMode;
     el('editor-menu-insert-id').hidden = _previewMode;
     el('editor-menu-insert-link').hidden = _previewMode;
     el('editor-menu-goto-id').hidden = _previewMode;
@@ -1407,7 +1466,7 @@ const Editor = (() => {
       item.className = 'backlinks-item';
       item.addEventListener('click', () => {
         el('backlinks-dlg').close();
-        openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified });
+        openOther({ path: entry.path, name: entry.name, fileHandle: entry.fileHandle, lastModified: entry.lastModified }, { tabMode: 'replace' });
       });
       list.appendChild(item);
     }
@@ -1562,6 +1621,7 @@ const Editor = (() => {
   // le défilement (même technique de mirror-div que le TOC ci-dessus).
 
   function searchOpen() {
+    if (_previewMode) togglePreview(); // la recherche opère sur le textarea : repasse en édition
     const bar = el('ed-search-bar');
     if (!bar.hidden) { searchClose(); return; } // Ctrl+F alors que la barre est déjà ouverte -> la ferme
     bar.hidden = false;
@@ -1693,7 +1753,7 @@ const Editor = (() => {
     } catch (e) {
       console.error('Échec de la réindexation après renommage', e);
     }
-    await open(newFile);
+    await open(newFile, { tabMode: 'replace' });
   }
 
   // --- Sauvegardes (créer / restaurer) ----------------------------------------
@@ -1756,56 +1816,209 @@ const Editor = (() => {
     return [...local, ...remote.filter(p => !localNames.has(p.name))].sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  // Demande à l'utilisateur de choisir parmi `choices` ; résout l'id choisi, ou `null` si le
+  // dialogue est fermé sans choix.
+  function askPluginChoice(title, choices) {
+    return new Promise(resolve => {
+      const dlg = el('plugin-choice-dlg');
+      el('plugin-choice-title').textContent = title;
+      const list = el('plugin-choice-list');
+      list.innerHTML = '';
+      let chosen = null;
+      for (const choice of choices) {
+        const item = document.createElement('div');
+        item.className = 'plugins-item';
+        item.textContent = choice.label;
+        item.addEventListener('click', () => {
+          chosen = choice.id;
+          dlg.close();
+        });
+        list.appendChild(item);
+      }
+      dlg.addEventListener('close', () => resolve(chosen), { once: true });
+      dlg.showModal();
+    });
+  }
+
+  // Un clic sur l'image la passe en plein écran (nouveau clic : retour à la taille normale).
+  function showPluginDisplay(display) {
+    const dlg = el('plugin-display-dlg');
+    const canvas = el('plugin-display-canvas');
+    el('plugin-display-title').textContent = display.title;
+    Plugins.drawDisplay(canvas, display);
+    dlg.classList.remove('fullscreen');
+    // Plein écran : le canvas est redessiné à la taille de la fenêtre (et à chaque rotation).
+    const layout = () => {
+      if (!dlg.classList.contains('fullscreen')) return;
+      Plugins.drawDisplay(canvas, display, { width: window.innerWidth - 32, height: window.innerHeight - 32 });
+    };
+    window.removeEventListener('resize', showPluginDisplay.onResize);
+    showPluginDisplay.onResize = layout;
+    window.addEventListener('resize', layout);
+    canvas.onclick = () => {
+      const full = dlg.classList.toggle('fullscreen');
+      if (full) layout();
+      else Plugins.drawDisplay(canvas, display);
+    };
+    el('plugin-display-caption').textContent = display.caption;
+    el('plugin-display-dlg').showModal();
+  }
+
+  // Page HTML d'un greffon (ex. partition ABC) dans une iframe isolée (`sandbox="allow-scripts"`,
+  // CSP sans réseau, voir `Plugins.htmlDocument`). Icône plein écran : le dialogue occupe toute
+  // la fenêtre. Fermer vide l'iframe pour couper le son éventuel.
+  function showPluginHtml(page) {
+    const dlg = el('plugin-html-dlg');
+    el('plugin-html-title').textContent = page.title;
+    dlg.classList.remove('fullscreen');
+    el('plugin-html-frame').srcdoc = Plugins.htmlDocument(page.html);
+    dlg.showModal();
+  }
+
+  // Exécute un greffon sur le contenu ACTUEL de la note (à partir de la position du curseur)
+  // dans un Worker isolé (voir `Plugins.runAction`), puis applique le résultat comme une
+  // frappe normale (`applyFormattingResult` : marque `dirty`, ne sauvegarde pas directement -
+  // même choix qu'Android, `EditorViewModel.runPlugin`) : l'utilisateur garde la main via
+  // "Enregistrer" et les garde-fous existants. Le résultat brut peut porter
+  // `Plugins.CURSOR_MARKER` pour repositionner le curseur avec précision. Un greffon qui
+  // déclare `Plugin.choices` demande d'abord le choix (`askPluginChoice`, 4e paramètre) ; sa
+  // sélection est le 3e. Le résultat peut être un texte de remplacement, un message, une image
+  // (`display`) ou une page `html` - seul le texte modifie la note.
+  async function runPlugin(plugin) {
+    el('plugins-dlg').close();
+    const input = ta();
+    const cursor = input.selectionStart;
+    let selection = input.value.slice(input.selectionStart, input.selectionEnd);
+    // Plugin.clipboardFallback: true -> sélection vide remplacée par le presse-papiers.
+    if (!selection && /clipboardFallback\s*:\s*true/.test(plugin.source)) {
+      selection = await navigator.clipboard.readText().catch(() => '');
+    }
+    const rangeEnd = input.value.length;
+    let choice = '';
+    if (plugin.choices.length > 0) {
+      choice = await askPluginChoice(plugin.displayName, plugin.choices);
+      if (choice === null) return;
+    }
+    const result = await Plugins.runAction(plugin.source, input.value, cursor, selection, choice, I18n.effectiveLanguage());
+    if (result === null) {
+      alert(I18n.t('editor.pluginFailed'));
+      return;
+    }
+    if (result.kind === 'message') {
+      alert(result.text);
+      return;
+    }
+    if (result.kind === 'display') {
+      showPluginDisplay(result);
+      return;
+    }
+    if (result.kind === 'html') {
+      showPluginHtml(result);
+      return;
+    }
+    const { text, cursor: newCursor } = Plugins.stripCursorMarker(result.text, cursor);
+    const clamped = Math.min(Math.max(newCursor, 0), text.length);
+    applyFormattingResult({
+      rangeStart: 0,
+      rangeEnd,
+      replacement: text,
+      cursorStart: clamped,
+      cursorEnd: clamped,
+    });
+  }
+
+  // Liste des greffons ; en mode "gérer" (icône réglage), une case à cocher par greffon l'active
+  // ou le désactive (`State.settings.disabledPlugins`) au lieu de le lancer.
+  function renderPluginsList(plugins, manage) {
+    const list = el('plugins-list');
+    list.innerHTML = '';
+    const disabled = new Set(State.settings.disabledPlugins);
+    const order = State.settings.pluginOrder;
+    const rank = p => { const i = order.indexOf(p.name); return i < 0 ? order.length : i; };
+    plugins.sort((a, b) => rank(a) - rank(b) || a.displayName.localeCompare(b.displayName));
+    const visible = manage ? plugins : plugins.filter(p => !disabled.has(p.name));
+    el('plugins-title').textContent = I18n.t(manage ? 'editor.pluginsManageTitle' : 'editor.pluginsTitle');
+    el('plugins-manage-btn').innerHTML = manage ? I18n.t('editor.pluginsManageDone') : Icons.gear();
+    el('plugins-manage-btn').title = I18n.t('editor.pluginsManage');
+    el('plugins-manage-btn').hidden = plugins.length === 0;
+    el('plugins-empty-hint').hidden = plugins.length > 0;
+    el('plugins-all-disabled-hint').hidden = !(plugins.length > 0 && visible.length === 0);
+
+    for (const plugin of visible) {
+      const item = document.createElement('div');
+      item.className = 'plugins-item';
+      const colorHex = State.settings.pluginColors[plugin.name];
+      const dot = document.createElement('span');
+      dot.className = 'plugins-item-dot';
+      if (colorHex) dot.style.background = colorHex;
+      else if (!manage) dot.style.visibility = 'hidden';
+      item.appendChild(dot);
+      const label = document.createElement('span');
+      label.className = 'plugins-item-name';
+      label.textContent = plugin.displayName;
+      item.appendChild(label);
+      if (manage) {
+        const file = document.createElement('span');
+        file.className = 'plugins-item-file';
+        file.textContent = plugin.name;
+        item.appendChild(file);
+        // Puce : un clic passe à la couleur suivante (aucune -> 8 teintes -> aucune).
+        dot.classList.add('plugins-item-dot-edit');
+        dot.title = I18n.t('editor.pluginsColor');
+        dot.addEventListener('click', async e => {
+          e.stopPropagation();
+          const i = colorHex ? REPOSITORY_COLOR_SWATCHES.indexOf(colorHex) : -1;
+          await setPluginColor(plugin.name, REPOSITORY_COLOR_SWATCHES[i + 1] || null);
+          renderPluginsList(plugins, manage);
+        });
+        for (const [delta, glyph, key] of [[-1, '↑', 'editor.pluginsMoveUp'], [1, '↓', 'editor.pluginsMoveDown']]) {
+          const btn = document.createElement('button');
+          btn.className = 'icon-btn';
+          btn.textContent = glyph;
+          btn.title = I18n.t(key);
+          btn.addEventListener('click', async e => {
+            e.stopPropagation();
+            const names = plugins.map(p => p.name);
+            const from = names.indexOf(plugin.name);
+            const to = from + delta;
+            if (to < 0 || to >= names.length) return;
+            [names[from], names[to]] = [names[to], names[from]];
+            await setPluginOrder(names);
+            renderPluginsList(plugins, manage);
+          });
+          item.appendChild(btn);
+        }
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = !disabled.has(plugin.name);
+        box.addEventListener('click', e => e.stopPropagation());
+        box.addEventListener('change', () => setPluginDisabled(plugin.name, !box.checked));
+        item.appendChild(box);
+        item.addEventListener('click', () => box.click());
+      } else {
+        item.addEventListener('click', () => runPlugin(plugin));
+      }
+      list.appendChild(item);
+    }
+  }
+
   async function openPluginsDialog() {
     if (!_repo) return;
     const files = await collectPluginFiles();
-    // `Plugin.name` (lu via `Plugins.readName`, même sandbox Worker que l'exécution) affiché
-    // à la place du nom de fichier, repli sur celui-ci si absent/invalide — même repli
-    // qu'Android (`PluginHost.readName`).
+    // `Plugin.name` et `Plugin.choices` (lus via `Plugins.readMetadata`, même sandbox Worker que
+    // l'exécution) : le nom est affiché à la place du nom de fichier, repli sur celui-ci si
+    // absent/invalide - même repli qu'Android (`PluginHost.readName`).
     const plugins = await Promise.all(files.map(async file => {
       const source = await FSA.readFileText(file.fileHandle);
-      const displayName = await Plugins.readName(source);
-      return { ...file, source, displayName: displayName || file.name };
+      const { name, choices } = await Plugins.readMetadata(source, I18n.effectiveLanguage());
+      return { ...file, source, choices, displayName: name || file.name };
     }));
-    const list = el('plugins-list');
-    list.innerHTML = '';
-    el('plugins-empty-hint').hidden = plugins.length > 0;
-
-    for (const plugin of plugins) {
-      const item = document.createElement('div');
-      item.className = 'plugins-item';
-      item.textContent = plugin.displayName;
-      // Exécute le greffon sur le contenu ACTUEL de la note (à partir de la position du
-      // curseur) dans un Worker isolé (voir `Plugins.runAction`), puis applique le résultat
-      // comme une frappe normale (`applyFormattingResult` : marque `dirty`, ne sauvegarde
-      // pas directement — même choix qu'Android, `EditorViewModel.runPlugin`) : l'utilisateur
-      // garde la main via "Enregistrer" et les garde-fous existants. Le résultat brut peut
-      // porter `Plugins.CURSOR_MARKER` (voir `plugins.js`) pour repositionner le curseur avec
-      // précision plutôt que le laisser en fin de note (comportement par défaut d'un
-      // remplacement intégral) — même mécanisme qu'Android
-      // (`stripPluginCursorMarker`/`applyFormatting`).
-      item.addEventListener('click', async () => {
-        el('plugins-dlg').close();
-        const input = ta();
-        const cursor = input.selectionStart;
-        const rangeEnd = input.value.length;
-        const raw = await Plugins.runAction(plugin.source, input.value, cursor);
-        if (raw === null) {
-          alert(I18n.t('editor.pluginFailed'));
-          return;
-        }
-        const { text, cursor: newCursor } = Plugins.stripCursorMarker(raw, cursor);
-        const clamped = Math.min(Math.max(newCursor, 0), text.length);
-        applyFormattingResult({
-          rangeStart: 0,
-          rangeEnd,
-          replacement: text,
-          cursorStart: clamped,
-          cursorEnd: clamped,
-        });
-      });
-      list.appendChild(item);
-    }
+    let manage = false;
+    renderPluginsList(plugins, manage);
+    el('plugins-manage-btn').onclick = () => {
+      manage = !manage;
+      renderPluginsList(plugins, manage);
+    };
     el('plugins-dlg').showModal();
   }
 
@@ -1822,11 +2035,13 @@ const Editor = (() => {
     el('editor-menu-backup-create').innerHTML = `${Icons.clock()} ${I18n.t('editor.createBackup')}`;
     el('editor-menu-backup-restore').innerHTML = `${Icons.restore()} ${I18n.t('editor.restoreBackup')}`;
     el('editor-menu-plugins').innerHTML = `${Icons.wrench()} ${I18n.t('editor.plugins')}`;
+    el('plugin-html-fullscreen').innerHTML = el('plugin-html-dlg').classList.contains('fullscreen') ? Icons.minimize() : Icons.maximize();
     el('editor-menu-encrypt').innerHTML = `${Icons.lock()} ${I18n.t('editor.encryptNoteTitle')}`;
     el('editor-menu-decrypt').innerHTML = `${Icons.unlock()} ${I18n.t('editor.decryptNoteTitle')}`;
     el('editor-menu-settings').innerHTML = `${Icons.gear()} ${I18n.t('common.settings')}`;
     el('rename-note-confirm').innerHTML = `${Icons.save()} ${I18n.t('common.rename')}`;
     el('ed-ctx-follow-link').innerHTML = `${Icons.link()} ${I18n.t('editor.ctxFollowLink')}`;
+    el('ed-ctx-follow-link-tab').innerHTML = `${Icons.link()} ${I18n.t('editor.ctxFollowLinkTab')}`;
     el('ed-ctx-h1').innerHTML = `<span class="ctx-glyph">H1</span> ${I18n.t('editor.ctxH1')}`;
     el('ed-ctx-h2').innerHTML = `<span class="ctx-glyph">H2</span> ${I18n.t('editor.ctxH2')}`;
     el('ed-ctx-h3').innerHTML = `<span class="ctx-glyph">H3</span> ${I18n.t('editor.ctxH3')}`;
@@ -1847,6 +2062,11 @@ const Editor = (() => {
   }
 
   function init() {
+    ta().addEventListener('keyup', scheduleCursorSave);
+    ta().addEventListener('click', scheduleCursorSave);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') { clearTimeout(_cursorSaveTimer); saveCursorPosition(); }
+    });
     el('editor-toc-btn').innerHTML = Icons.toc();
     el('editor-backlinks-icon').innerHTML = Icons.link();
     el('editor-preview-btn').innerHTML = Icons.eye();
@@ -1870,6 +2090,9 @@ const Editor = (() => {
     el('editor-menu-insert-id').addEventListener('click', runMenuAction(insertId));
     el('editor-menu-insert-link').addEventListener('click', runMenuAction(openLinkPicker));
     el('editor-menu-goto-id').addEventListener('click', runMenuAction(goToId));
+    el('editor-menu-favorite').addEventListener('click', runMenuAction(() => {
+      if (_repo && _file) toggleFavorite(_repo.id, _file.path);
+    }));
     el('editor-menu-rename').addEventListener('click', runMenuAction(openRenameDialog));
     el('editor-menu-backup-create').addEventListener('click', runMenuAction(createBackupNow));
     el('editor-menu-backup-restore').addEventListener('click', runMenuAction(openBackupRestore));
@@ -1904,6 +2127,10 @@ const Editor = (() => {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         searchOpen();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g' && !e.shiftKey) {
+        // Ctrl+G : menu Greffons (masque le "suivant" natif du navigateur dans l'éditeur seulement).
+        e.preventDefault();
+        openPluginsDialog();
       }
     });
     // `applyEditorTypography()` (round 33) : replafonne les marges du mode
@@ -1942,7 +2169,14 @@ const Editor = (() => {
       if (window.CSS && CSS.highlights) CSS.highlights.delete('ed-selection');
       el('ed-caret').hidden = true;
     });
-    el('ed-preview').addEventListener('click', onPreviewClick);
+    el('ed-preview').addEventListener('mousedown', onPreviewMouseDown);
+    el('ed-preview').addEventListener('mouseup', cancelPreviewHold);
+    el('ed-preview').addEventListener('mouseleave', cancelPreviewHold);
+    // Un clic qui suit un maintien déjà traité par le dialogue ne doit pas suivre le lien.
+    el('ed-preview').addEventListener('click', e => {
+      if (_holdFired) { _holdFired = false; e.preventDefault(); return; }
+      onPreviewClick(e);
+    });
     el('ed-preview').addEventListener('change', onPreviewChange);
 
     // Résout et mémorise l'ANCRE du glisser en offset de texte DÈS le
@@ -2025,7 +2259,11 @@ const Editor = (() => {
       e.preventDefault();
       openContextMenu(e.clientX, e.clientY);
     });
-    el('ed-ctx-follow-link').addEventListener('click', runContextMenuAction(followContextLink));
+    el('ed-ctx-follow-link').addEventListener('click', runContextMenuAction(() => followContextLink(false)));
+    el('ed-ctx-follow-link-tab').addEventListener('click', runContextMenuAction(followContextLinkNewTab));
+    el('link-open-current').addEventListener('click', () => chooseLinkOpen(false));
+    el('link-open-new').addEventListener('click', () => chooseLinkOpen(true));
+    el('link-open-cancel').addEventListener('click', () => { _holdEntry = null; el('link-open-dlg').close(); });
     el('ed-ctx-h1').addEventListener('click', runContextMenuAction(() => formatHeading(1)));
     el('ed-ctx-h2').addEventListener('click', runContextMenuAction(() => formatHeading(2)));
     el('ed-ctx-h3').addEventListener('click', runContextMenuAction(() => formatHeading(3)));
@@ -2058,6 +2296,15 @@ const Editor = (() => {
     el('rename-note-confirm').addEventListener('click', confirmRename);
     el('backup-restore-close').addEventListener('click', () => el('backup-restore-dlg').close());
     el('plugins-close').addEventListener('click', () => el('plugins-dlg').close());
+    el('plugin-choice-close').addEventListener('click', () => el('plugin-choice-dlg').close());
+    el('plugin-display-close').addEventListener('click', () => el('plugin-display-dlg').close());
+    el('plugin-html-close').addEventListener('click', () => el('plugin-html-dlg').close());
+    el('plugin-html-dlg').addEventListener('close', () => { el('plugin-html-frame').srcdoc = ''; });
+    el('plugin-html-fullscreen').addEventListener('click', () => {
+      const full = el('plugin-html-dlg').classList.toggle('fullscreen');
+      el('plugin-html-fullscreen').innerHTML = full ? Icons.minimize() : Icons.maximize();
+      el('plugin-html-fullscreen').title = I18n.t(full ? 'editor.pluginFullscreenExit' : 'editor.pluginFullscreen');
+    });
 
     el('note-password-cancel').addEventListener('click', cancelPasswordPrompt);
     el('note-password-confirm').addEventListener('click', confirmPasswordPrompt);

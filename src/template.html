@@ -27,6 +27,7 @@
       <button data-mode="name" class="active" data-i18n="browser.searchName"></button>
       <button data-mode="content" data-i18n="browser.searchContent"></button>
       <button data-mode="tag" data-i18n="browser.searchTag"></button>
+      <button data-mode="noid" data-i18n="browser.searchNoId"></button>
     </div>
     <input type="text" id="repo-search-input" data-i18n-placeholder="browser.searchPlaceholderName" autocomplete="off">
     <button id="repo-search-clear-btn" data-i18n-title="browser.clearSearchTooltip" class="icon-btn" hidden>✕</button>
@@ -163,6 +164,15 @@
       <span class="switch"><input type="checkbox" id="settings-extensions-all"><span class="switch-track"></span></span>
     </label>
 
+    <p class="settings-section-title" data-i18n="settings.sectionSearch"></p>
+    <label class="settings-row settings-switch-row">
+      <span class="settings-row-info">
+        <span data-i18n="settings.searchAccentSensitiveLabel"></span>
+        <span class="settings-row-desc" data-i18n="settings.searchAccentSensitiveDesc"></span>
+      </span>
+      <span class="switch"><input type="checkbox" id="settings-search-accent-sensitive"><span class="switch-track"></span></span>
+    </label>
+
     <p class="settings-section-title" data-i18n="settings.sectionZettelkasten"></p>
     <label class="settings-row"><span data-i18n="settings.idPatternLabel"></span>
       <input type="text" id="settings-id-pattern" autocomplete="off">
@@ -254,12 +264,14 @@
       <button data-mode="name" class="active" data-i18n="browser.searchName"></button>
       <button data-mode="content" data-i18n="browser.searchContent"></button>
       <button data-mode="tag" data-i18n="browser.searchTag"></button>
+      <button data-mode="noid" data-i18n="browser.searchNoId"></button>
     </div>
     <input type="text" id="browser-search-input" data-i18n-placeholder="browser.searchPlaceholderName" autocomplete="off">
     <button id="browser-search-clear-btn" data-i18n-title="browser.clearSearchTooltip" class="icon-btn" hidden>✕</button>
     <button id="browser-tags-btn" data-i18n-title="browser.tagsTooltip" class="icon-btn" hidden></button>
     <button id="browser-search-scope-btn" class="icon-btn" hidden></button>
     <button id="browser-sort-btn" class="icon-btn"></button>
+    <button id="browser-sort-fav-btn" class="icon-btn"></button>
   </div>
   <p id="browser-empty-hint" class="hint" data-i18n="browser.emptyHintNoFiles" hidden></p>
   <div id="browser-list"></div>
@@ -338,12 +350,14 @@
             <button id="editor-menu-insert-id" class="icon-label-btn"></button>
             <button id="editor-menu-insert-link" class="icon-label-btn"></button>
             <button id="editor-menu-goto-id" class="icon-label-btn"></button>
+            <hr id="editor-menu-sep" style="margin:4px 0;border:0;border-top:1px solid currentColor;opacity:.25">
+            <button id="editor-menu-favorite" class="icon-label-btn"></button>
             <button id="editor-menu-rename" class="icon-label-btn"></button>
-            <button id="editor-menu-backup-create" class="icon-label-btn"></button>
-            <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
             <button id="editor-menu-plugins" class="icon-label-btn"></button>
             <button id="editor-menu-encrypt" class="icon-label-btn"></button>
             <button id="editor-menu-decrypt" class="icon-label-btn"></button>
+            <button id="editor-menu-backup-create" class="icon-label-btn"></button>
+            <button id="editor-menu-backup-restore" class="icon-label-btn"></button>
             <button id="editor-menu-settings" class="icon-label-btn"></button>
           </div>
         </div>
@@ -381,6 +395,7 @@
                sélection/le curseur chevauche un lien [[cible|zkId]]. -->
           <div id="ed-context-menu" hidden>
             <button id="ed-ctx-follow-link" class="icon-label-btn action-row" hidden></button>
+            <button id="ed-ctx-follow-link-tab" class="icon-label-btn action-row" hidden></button>
             <button id="ed-ctx-h1" class="icon-label-btn action-row"></button>
             <button id="ed-ctx-h2" class="icon-label-btn action-row"></button>
             <button id="ed-ctx-h3" class="icon-label-btn action-row"></button>
@@ -419,7 +434,19 @@
   <div id="editor-empty-state" hidden>
     <p data-i18n="editor.emptyStateHint"></p>
   </div>
+  <!-- Onglets de notes ouvertes (tabs.js), en bas de l'éditeur. -->
+  <div id="ed-tabbar" hidden></div>
 </div>
+
+<!-- Lien maintenu dans l'aperçu : onglet courant ou nouvel onglet -->
+<dialog id="link-open-dlg">
+  <p data-i18n="editor.linkOpenTitle"></p>
+  <div class="dlg-btn-row">
+    <button id="link-open-current" data-i18n="editor.linkOpenCurrent"></button>
+    <button id="link-open-new" data-i18n="editor.linkOpenNewTab"></button>
+    <button id="link-open-cancel" data-i18n="common.cancel"></button>
+  </div>
+</dialog>
 
 <!-- Save-before-closing confirmation (Yes = save & close, No = discard & close, Cancel = stay) -->
 <dialog id="close-confirm-dlg">
@@ -491,11 +518,45 @@
      actuel de la note dans un Worker isolé (voir plugins.js). -->
 <dialog id="plugins-dlg">
   <div id="plugins-header">
-    <span data-i18n="editor.pluginsTitle"></span>
-    <button id="plugins-close" data-i18n-title="common.close">✕</button>
+    <span id="plugins-title" data-i18n="editor.pluginsTitle"></span>
+    <span class="plugins-header-actions">
+      <button id="plugins-manage-btn" class="icon-btn"></button>
+      <button id="plugins-close" data-i18n-title="common.close">✕</button>
+    </span>
   </div>
   <p id="plugins-empty-hint" class="hint" data-i18n="editor.pluginsEmptyHint" hidden></p>
+  <p id="plugins-all-disabled-hint" class="hint" data-i18n="editor.pluginsAllDisabled" hidden></p>
   <div id="plugins-list"></div>
+</dialog>
+
+<!-- Choix demandé par un greffon qui déclare Plugin.choices (ex. QR code / Code 128), puis
+     image produite par un greffon (Plugin.action -> {display: ...}), voir plugins.js. -->
+<dialog id="plugin-choice-dlg">
+  <div id="plugin-choice-header">
+    <span id="plugin-choice-title"></span>
+    <button id="plugin-choice-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <div id="plugin-choice-list"></div>
+</dialog>
+
+<dialog id="plugin-html-dlg">
+  <div id="plugin-html-header">
+    <span id="plugin-html-title"></span>
+    <span class="plugins-header-actions">
+      <button id="plugin-html-fullscreen" class="icon-btn" data-i18n-title="editor.pluginFullscreen"></button>
+      <button id="plugin-html-close" data-i18n-title="common.close">✕</button>
+    </span>
+  </div>
+  <iframe id="plugin-html-frame" sandbox="allow-scripts" title="plugin"></iframe>
+</dialog>
+
+<dialog id="plugin-display-dlg">
+  <div id="plugin-display-header">
+    <span id="plugin-display-title"></span>
+    <button id="plugin-display-close" data-i18n-title="common.close">✕</button>
+  </div>
+  <canvas id="plugin-display-canvas"></canvas>
+  <p id="plugin-display-caption" class="hint"></p>
 </dialog>
 
 <!-- Notes chiffrées façon QOwnNotes (round 27 Android, porté ici) : demande le mot de

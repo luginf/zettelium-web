@@ -395,6 +395,24 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
    ci-dessous) même quand aucune note n'est ouverte. */
 #editor-note-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 #editor-note-view[hidden] { display: none; }
+
+/* Barre d'onglets en bas de l'éditeur. */
+#ed-tabbar {
+  display: flex; flex: 0 0 auto; overflow-x: auto; background: var(--bg-bar);
+  border-top: 1px solid var(--comment);
+}
+#ed-tabbar[hidden] { display: none; }
+.ed-tab {
+  display: flex; align-items: center; gap: 4px; padding: 6px 4px 6px 12px; cursor: pointer;
+  white-space: nowrap; color: var(--fg); opacity: .7; flex: 0 0 auto; max-width: 220px;
+}
+.ed-tab.active { opacity: 1; font-weight: bold; background: var(--bg); }
+.ed-tab-label { overflow: hidden; text-overflow: ellipsis; }
+.ed-tab-close {
+  background: none; border: none; color: inherit; cursor: pointer; font-size: 11px; padding: 2px 6px; opacity: .7;
+}
+.ed-tab-close:hover { opacity: 1; }
+#link-open-dlg .dlg-btn-row { flex-wrap: wrap; }
 #editor-empty-state {
   flex: 1;
   display: flex;
@@ -704,8 +722,8 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
    un bloc réellement visible même fermé (round 19bis, bug découvert via le
    panneau de fichiers épinglé : body en `flex-row` en a fait un item de
    la ligne au lieu d'un bloc poussé hors écran par le flux normal). */
-#zklink-picker-dlg[open], #backlinks-dlg[open], #toc-dlg[open], #backup-restore-dlg[open], #tag-browser-dlg[open], #repo-color-dlg[open] { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
-#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header, #tag-browser-header, #repo-color-header {
+#zklink-picker-dlg[open], #backlinks-dlg[open], #toc-dlg[open], #backup-restore-dlg[open], #tag-browser-dlg[open], #repo-color-dlg[open], #plugin-choice-dlg[open], #plugin-display-dlg[open], #plugin-html-dlg[open], #plugins-dlg[open] { width: min(420px, 92vw); max-height: 70vh; display: flex; flex-direction: column; }
+#zklink-picker-header, #backlinks-header, #toc-header, #backup-restore-header, #rename-note-header, #tag-browser-header, #repo-color-header, #plugin-choice-header, #plugin-display-header, #plugin-html-header, #plugins-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -714,7 +732,16 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
   flex-shrink: 0;
 }
 #zklink-filter { margin: 8px 12px; }
-#zklink-list, #backlinks-list, #toc-list, #backup-restore-list, #tag-browser-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
+#plugin-choice-list .plugins-item { padding: 10px 16px; cursor: pointer; }
+#plugin-choice-list .plugins-item:hover { background: var(--bg-bar); }
+/* Image d'un greffon : toujours noir sur blanc (lisible par un lecteur), indépendante du thème. */
+#plugin-display-canvas { align-self: center; margin: 12px; max-width: calc(100% - 24px); image-rendering: pixelated; }
+#plugin-display-canvas { cursor: zoom-in; }
+#plugin-display-dlg.fullscreen[open] { width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; background: #fff; align-items: center; justify-content: center; }
+#plugin-display-dlg.fullscreen #plugin-display-canvas { cursor: zoom-out; max-width: none; }
+#plugin-display-dlg.fullscreen #plugin-display-header, #plugin-display-dlg.fullscreen #plugin-display-caption { display: none; }
+#plugin-display-caption { margin: 0 12px 12px; text-align: center; overflow-wrap: anywhere; }
+#plugins-list, #zklink-list, #backlinks-list, #toc-list, #backup-restore-list, #tag-browser-list { overflow-y: auto; overscroll-behavior: contain; flex: 1; }
 
 #repo-color-swatches { display: flex; flex-wrap: wrap; gap: 10px; padding: 16px; }
 .repo-color-swatch {
@@ -877,3 +904,15 @@ body.sticky-workspace-active #file-list-sidebar-resizer {
 
 #external-conflict-dlg { width: min(440px, 92vw); }
 #external-conflict-msg { padding: 16px 20px 4px; }
+
+/* Greffons : liste avec cases à cocher (mode "gérer") et page HTML isolée (iframe). */
+.plugins-header-actions { display: flex; align-items: center; gap: 4px; }
+#plugins-list .plugins-item { display: flex; align-items: center; gap: 8px; padding: 10px 16px; cursor: pointer; }
+#plugins-list .plugins-item:hover { background: var(--bg-bar); }
+.plugins-item-name { flex: 1; }
+.plugins-item-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.plugins-item-dot-edit { cursor: pointer; box-sizing: border-box; border: 1px solid var(--fg-bar); }
+.plugins-item-file { color: var(--fg-bar); font-size: 0.8em; }
+#plugin-html-dlg[open] { width: min(900px, 96vw); height: 85vh; max-height: 90vh; }
+#plugin-html-frame { flex: 1; border: 0; background: #fff; width: 100%; }
+#plugin-html-dlg.fullscreen[open] { width: 100vw; max-width: 100vw; height: 100vh; max-height: 100vh; }

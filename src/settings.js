@@ -163,6 +163,7 @@ const Settings = (() => {
     el('settings-extensions-input').value = State.settings.noteExtensions;
     el('settings-extensions-all').checked = State.settings.noteExtensionsFilterDisabled;
     el('settings-extensions-input').disabled = State.settings.noteExtensionsFilterDisabled;
+    el('settings-search-accent-sensitive').checked = State.settings.searchAccentSensitive;
     el('settings-id-pattern').value = State.settings.idPattern;
     el('settings-id-format').value = State.settings.idGenerationFormat;
     updateIdPreview();
@@ -290,6 +291,9 @@ const Settings = (() => {
     el('settings-extensions-all').addEventListener('change', async e => {
       await setNoteExtensionsFilterDisabled(e.target.checked);
       sync();
+    });
+    el('settings-search-accent-sensitive').addEventListener('change', e => {
+      setSearchAccentSensitive(e.target.checked);
     });
     el('settings-id-pattern').addEventListener('input', async e => {
       await setIdPattern(e.target.value);

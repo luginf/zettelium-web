@@ -65,6 +65,8 @@ const Txt2TagsRender = (() => {
         return ''; // jamais rendu
       case 'HorizontalRule':
         return '<hr>';
+      case 'BlankLines':
+        return `<div class="t2t-blank" style="height:${block.count * 1.4}em"></div>`;
       case 'CodeBlock':
         return `<pre class="t2t-code">${escapeHtml(block.lines.join('\n'))}</pre>`;
       case 'ListNode': {
